@@ -84,3 +84,12 @@
 
 ## Bug Fix - Export Error
 - [x] Fix null check in exportToExcel - handle both celldata and data array formats from FortuneSheet
+
+## Specialized Templates (Pro Feature)
+- [x] Create template data structure with optimized AI prompts
+- [x] Invoice Template - extract vendor, line items, totals, dates
+- [x] Bank Statement Template - extract transactions, running balance, account info
+- [x] Build template selection UI with Pro-only badges
+- [x] Gate specialized templates behind Pro subscription
+- [x] Integrate template selection into conversion flow
+- [ ] Add confidence scoring display (Pro feature)

@@ -20,6 +20,7 @@ import {
   seedTemplates,
 } from "./db";
 import { extractTablesFromPDF, extractTablesFromMultiplePages } from "./lib/openrouter";
+import { getTemplate, getAllTemplates as getServerTemplates, EXTRACTION_TEMPLATES } from "./lib/templates";
 import { validateImageBase64, convertPdfToImages } from "./lib/pdfToImage";
 import { tablesToExcel, spreadsheetDataToExcel } from "./lib/excel";
 import { createCheckoutSession, createPortalSession, getStripeConfig } from "./lib/stripe";
@@ -114,6 +115,21 @@ export const appRouter = router({
         return await checkAnonymousUsageLimit(ip);
       }),
 
+    // Get available templates
+    getTemplates: publicProcedure.query(async ({ ctx }) => {
+      const isPro = ctx.user ? (await getUserById(ctx.user.id))?.subscriptionStatus === 'pro' : false;
+      return {
+        templates: EXTRACTION_TEMPLATES.map(t => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          icon: t.icon,
+          isPro: t.isPro,
+        })),
+        userIsPro: isPro,
+      };
+    }),
+
     // Process PDF and extract tables
     process: publicProcedure
       .input(z.object({
@@ -122,6 +138,7 @@ export const appRouter = router({
         fileSize: z.number(),
         mimeType: z.string().default('image/png'),
         anonymousId: z.string().optional(),
+        templateId: z.string().default('generic'),
       }))
       .mutation(async ({ ctx, input }) => {
         const ip = ctx.req.headers['x-forwarded-for'] as string || ctx.req.socket?.remoteAddress || '127.0.0.1';
@@ -149,6 +166,35 @@ export const appRouter = router({
             error: 'File too large. Maximum size is 20MB.',
             errorCode: 'FILE_TOO_LARGE',
           };
+        }
+
+        // Get template and validate Pro access
+        const template = getTemplate(input.templateId);
+        if (!template) {
+          return {
+            success: false,
+            error: 'Invalid template selected',
+            errorCode: 'INVALID_TEMPLATE',
+          };
+        }
+
+        // Check if user has Pro access for Pro templates
+        if (template.isPro) {
+          if (!ctx.user) {
+            return {
+              success: false,
+              error: 'Pro templates require a Pro subscription. Please sign in and upgrade.',
+              errorCode: 'PRO_REQUIRED',
+            };
+          }
+          const user = await getUserById(ctx.user.id);
+          if (user?.subscriptionStatus !== 'pro') {
+            return {
+              success: false,
+              error: 'Pro templates require a Pro subscription. Upgrade to unlock specialized extraction.',
+              errorCode: 'PRO_REQUIRED',
+            };
+          }
         }
 
         // Create conversion record
@@ -210,7 +256,7 @@ export const appRouter = router({
               mimeType: 'image/png',
             }));
             
-            const result = await extractTablesFromMultiplePages(pages, input.fileName);
+            const result = await extractTablesFromMultiplePages(pages, input.fileName, undefined, template.systemPrompt);
             
             if (!result.success) {
               await updateConversion(conversion.id, {
@@ -261,7 +307,8 @@ export const appRouter = router({
           const result = await extractTablesFromPDF(
             imageBase64,
             input.fileName,
-            imageMimeType
+            imageMimeType,
+            template.systemPrompt
           );
 
           if (!result.success) {

@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye } from 'lucide-react';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown } from 'lucide-react';
+import TemplateSelector from '@/components/templates/TemplateSelector';
 import { toast } from 'sonner';
 
 interface ExtractedTable {
@@ -39,8 +40,10 @@ export default function Convert() {
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
   const [pageCount, setPageCount] = useState<number | undefined>(undefined);
   const [fileName, setFileName] = useState<string>('converted-tables');
+  const [selectedTemplate, setSelectedTemplate] = useState<string>('generic');
 
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
+  const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
 
   const handleFileSelect = useCallback(async (file: File, base64: string) => {
@@ -68,6 +71,7 @@ export default function Convert() {
         fileName: file.name,
         fileSize: file.size,
         mimeType: 'application/pdf',
+        templateId: selectedTemplate,
       });
 
       if (!result.success) {
@@ -148,8 +152,29 @@ export default function Convert() {
 
         {/* Upload Area */}
         {!processingStep && !extractedTables && (
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-3xl mx-auto space-y-6">
+            {/* Template Selector */}
+            {templatesData && (
+              <TemplateSelector
+                templates={templatesData.templates}
+                selectedTemplate={selectedTemplate}
+                onSelectTemplate={setSelectedTemplate}
+                isPro={templatesData.userIsPro}
+                onUpgradeClick={() => setLocation('/pricing')}
+              />
+            )}
+            
+            {/* File Upload */}
             <DropZone onFileSelect={handleFileSelect} />
+            
+            {/* Selected template info */}
+            {selectedTemplate !== 'generic' && templatesData && (
+              <div className="text-center text-sm text-muted-foreground">
+                Using <span className="font-medium text-foreground">
+                  {templatesData.templates.find(t => t.id === selectedTemplate)?.name}
+                </span> template for optimized extraction
+              </div>
+            )}
           </div>
         )}
 

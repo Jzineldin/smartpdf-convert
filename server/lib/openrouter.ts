@@ -82,7 +82,8 @@ WARNING TYPES:
 export async function extractTablesFromMultiplePages(
   pages: { pageNumber: number; base64: string; mimeType: string }[],
   fileName: string,
-  onProgress?: (current: number, total: number) => void
+  onProgress?: (current: number, total: number) => void,
+  customSystemPrompt?: string
 ): Promise<ExtractionResult> {
   const startTime = Date.now();
   const allTables: ExtractedTable[] = [];
@@ -101,7 +102,8 @@ export async function extractTablesFromMultiplePages(
     const result = await extractTablesFromPDF(
       page.base64,
       `${fileName} (Page ${page.pageNumber})`,
-      page.mimeType
+      page.mimeType,
+      customSystemPrompt
     );
 
     if (result.success) {
@@ -160,7 +162,8 @@ export async function extractTablesFromMultiplePages(
 export async function extractTablesFromPDF(
   fileBase64: string,
   fileName: string,
-  mimeType: string = 'application/pdf'
+  mimeType: string = 'application/pdf',
+  customSystemPrompt?: string
 ): Promise<ExtractionResult> {
   const startTime = Date.now();
 
@@ -209,7 +212,7 @@ export async function extractTablesFromPDF(
         messages: [
           {
             role: 'system',
-            content: SYSTEM_PROMPT,
+            content: customSystemPrompt || SYSTEM_PROMPT,
           },
           {
             role: 'user',
