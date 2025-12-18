@@ -126,7 +126,8 @@ export const appRouter = router({
 
     // Get available templates
     getTemplates: publicProcedure.query(async ({ ctx }) => {
-      const isPro = ctx.user ? (await getUserById(ctx.user.id))?.subscriptionStatus === 'pro' : false;
+      // In testing mode, everyone is Pro
+      const isPro = TESTING_MODE || (ctx.user ? (await getUserById(ctx.user.id))?.subscriptionStatus === 'pro' : false);
       return {
         templates: EXTRACTION_TEMPLATES.map(t => ({
           id: t.id,

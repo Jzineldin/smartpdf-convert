@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown } from 'lucide-react';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files } from 'lucide-react';
 import TemplateSelector from '@/components/templates/TemplateSelector';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
@@ -34,6 +34,10 @@ interface ExtractedTable {
   confidence: number;
 }
 
+interface TableWithSource extends ExtractedTable {
+  sourceFile: string;
+}
+
 interface AIWarning {
   type: string;
   message: string;
@@ -56,9 +60,16 @@ export default function Convert() {
   const [selectedTemplate, setSelectedTemplate] = useState<string>('generic');
   const [isTryingSample, setIsTryingSample] = useState<boolean>(false);
 
+  // Batch upload state (Pro feature)
+  const [accumulatedTables, setAccumulatedTables] = useState<TableWithSource[]>([]);
+  const [processedFiles, setProcessedFiles] = useState<string[]>([]);
+
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
+
+  // Check if user has Pro access (or TESTING_MODE is enabled)
+  const isPro = templatesData?.userIsPro ?? false;
 
   // Load cached conversion on mount
   useEffect(() => {
@@ -106,7 +117,10 @@ export default function Convert() {
 
   const handleFileSelect = useCallback(async (file: File, base64: string) => {
     setError(null);
-    setExtractedTables(null);
+    // Don't clear accumulated tables for Pro users adding more files
+    if (!isPro || processedFiles.length === 0) {
+      setExtractedTables(null);
+    }
     setWarnings([]);
     setViewMode('preview');
     setFileName(file.name);
@@ -145,22 +159,53 @@ export default function Convert() {
       await new Promise(resolve => setTimeout(resolve, 300));
 
       setProcessingStep('ready');
-      setExtractedTables(result.tables || []);
+
+      // For Pro users with batch mode, add source file info and accumulate
+      const currentTables = result.tables || [];
+
+      if (isPro) {
+        // Add source file to each table and potentially modify sheet names
+        const tablesWithSource: TableWithSource[] = currentTables.map(t => {
+          let sheetName = t.sheetName;
+          // Add filename suffix if we already have files processed (to avoid duplicates)
+          if (processedFiles.length > 0) {
+            const shortFileName = file.name.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, '').slice(0, 12);
+            sheetName = `${t.sheetName.slice(0, 17)}-${shortFileName}`;
+          }
+          // Ensure sheet name is within Excel's 31 char limit
+          if (sheetName.length > 31) {
+            sheetName = sheetName.slice(0, 31);
+          }
+          return { ...t, sheetName, sourceFile: file.name };
+        });
+
+        // Accumulate tables
+        setAccumulatedTables(prev => [...prev, ...tablesWithSource]);
+        setProcessedFiles(prev => [...prev, file.name]);
+        setExtractedTables(tablesWithSource);
+      } else {
+        // Free users: just replace (existing behavior)
+        setExtractedTables(currentTables);
+      }
+
       setWarnings(result.warnings || []);
       setConfidence(result.confidence || 0);
       setConversionId(result.conversionId || null);
       setPageCount(result.pageCount || undefined);
 
-      // Cache the results
-      saveToCache(result.tables || [], result.warnings || [], result.confidence || 0, file.name, result.pageCount);
+      // Cache the results (only for single file, not batch)
+      if (!isPro || processedFiles.length === 0) {
+        saveToCache(result.tables || [], result.warnings || [], result.confidence || 0, file.name, result.pageCount);
+      }
 
       const pageInfo = result.pageCount && result.pageCount > 1 ? ` from ${result.pageCount} pages` : '';
-      toast.success(`Successfully extracted ${result.tables?.length || 0} table(s)${pageInfo}!`);
+      const batchInfo = isPro && processedFiles.length > 0 ? ` (${processedFiles.length + 1} files total)` : '';
+      toast.success(`Successfully extracted ${result.tables?.length || 0} table(s)${pageInfo}${batchInfo}!`);
     } catch (err: any) {
       setProcessingStep('error');
       setError(err.message || 'An unexpected error occurred');
     }
-  }, [usageData, processMutation, saveToCache]);
+  }, [usageData, processMutation, saveToCache, isPro, processedFiles]);
 
   const handleTrySample = useCallback(async (templateId: string, sampleUrl: string) => {
     setError(null);
@@ -246,8 +291,20 @@ export default function Convert() {
     setViewMode('preview');
     setPageCount(undefined);
     setFileName('converted-tables');
+    // Clear batch state
+    setAccumulatedTables([]);
+    setProcessedFiles([]);
     // Clear the cache when user wants to start fresh
     localStorage.removeItem(CACHE_KEY);
+  };
+
+  // Pro feature: Add another file to the batch
+  const handleAddAnotherFile = () => {
+    // Keep accumulated tables but clear current view to show DropZone
+    setExtractedTables(null);
+    setProcessingStep(null);
+    setError(null);
+    setWarnings([]);
   };
 
   return (
@@ -290,6 +347,28 @@ export default function Convert() {
         {/* Upload Area */}
         {!processingStep && !extractedTables && (
           <div className="max-w-3xl mx-auto space-y-6">
+            {/* Batch mode indicator for Pro users adding more files */}
+            {isPro && processedFiles.length > 0 && (
+              <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-900/10">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Files className="h-5 w-5 text-blue-600" />
+                      <div>
+                        <span className="font-medium">Adding to batch:</span>
+                        <span className="text-muted-foreground ml-2">
+                          {processedFiles.length} file{processedFiles.length > 1 ? 's' : ''} already processed ({accumulatedTables.length} tables)
+                        </span>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={handleReset}>
+                      Start Fresh Instead
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Template Selector */}
             {templatesData && (
               <TemplateSelector
@@ -301,10 +380,10 @@ export default function Convert() {
                 onTrySample={handleTrySample}
               />
             )}
-            
+
             {/* File Upload */}
             <DropZone onFileSelect={handleFileSelect} />
-            
+
             {/* Selected template info */}
             {selectedTemplate !== 'generic' && templatesData && (
               <div className="text-center text-sm text-muted-foreground">
@@ -340,9 +419,9 @@ export default function Convert() {
           <div className="space-y-6">
             {/* Results Header */}
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-4 flex-wrap">
                 <h2 className="text-2xl font-bold">Extraction Results</h2>
-                <Badge 
+                <Badge
                   variant={confidence >= 0.9 ? 'default' : confidence >= 0.7 ? 'secondary' : 'destructive'}
                   className="font-normal"
                 >
@@ -353,11 +432,27 @@ export default function Convert() {
                     {pageCount} pages processed
                   </Badge>
                 )}
+                {/* Pro batch mode indicator */}
+                {isPro && processedFiles.length > 1 && (
+                  <Badge variant="secondary" className="font-normal gap-1">
+                    <Files className="h-3 w-3" />
+                    {processedFiles.length} files • {accumulatedTables.length} tables
+                  </Badge>
+                )}
               </div>
-              <Button onClick={handleReset} variant="outline">
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Convert Another
-              </Button>
+              <div className="flex items-center gap-2">
+                {/* Pro: Add Another File button */}
+                {isPro && (
+                  <Button onClick={handleAddAnotherFile} variant="outline" className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Add Another File
+                  </Button>
+                )}
+                <Button onClick={handleReset} variant="outline">
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  {isPro && processedFiles.length > 0 ? 'Start Fresh' : 'Convert Another'}
+                </Button>
+              </div>
             </div>
 
             {/* Confidence Score */}
@@ -463,14 +558,36 @@ export default function Convert() {
               <TabsContent value="edit" className="mt-4">
                 <div className="h-[600px]">
                   <SpreadsheetEditor
-                    tables={extractedTables}
-                    filename={fileName}
+                    tables={isPro && accumulatedTables.length > 0 ? accumulatedTables : extractedTables}
+                    filename={isPro && processedFiles.length > 1 ? 'combined-export' : fileName}
                   />
                 </div>
               </TabsContent>
             </Tabs>
 
-            {/* Upgrade CTA for free users */}
+            {/* Pro batch feature CTA for free users */}
+            {!isPro && (
+              <Card className="border-dashed border-2 border-amber-200 bg-amber-50/50 dark:bg-amber-900/10">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Crown className="h-6 w-6 text-amber-500" />
+                      <div>
+                        <span className="font-medium">Pro Feature:</span>
+                        <span className="text-muted-foreground ml-2">
+                          Combine multiple files into one Excel workbook
+                        </span>
+                      </div>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => setLocation('/pricing')}>
+                      Upgrade to Pro
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Upgrade CTA for free users running low */}
             {usageData && usageData.remaining !== -1 && usageData.remaining <= 1 && (
               <Card className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
                 <CardContent className="py-6">
