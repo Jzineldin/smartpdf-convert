@@ -139,6 +139,7 @@ export const appRouter = router({
         mimeType: z.string().default('image/png'),
         anonymousId: z.string().optional(),
         templateId: z.string().default('generic'),
+        isSampleDemo: z.boolean().default(false),
       }))
       .mutation(async ({ ctx, input }) => {
         const ip = ctx.req.headers['x-forwarded-for'] as string || ctx.req.socket?.remoteAddress || '127.0.0.1';
@@ -178,8 +179,8 @@ export const appRouter = router({
           };
         }
 
-        // Check if user has Pro access for Pro templates
-        if (template.isPro) {
+        // Check if user has Pro access for Pro templates (allow sample demos)
+        if (template.isPro && !input.isSampleDemo) {
           if (!ctx.user) {
             return {
               success: false,

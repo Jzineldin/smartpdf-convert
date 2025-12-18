@@ -11,7 +11,8 @@ import {
   TrendingUp,
   Lock,
   Check,
-  Crown
+  Crown,
+  Play
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -23,12 +24,22 @@ export interface Template {
   isPro: boolean;
 }
 
+// Sample document paths for each Pro template
+const sampleDocuments: Record<string, string> = {
+  invoice: '/samples/sample-invoice.webp',
+  'bank-statement': '/samples/sample-bank-statement.jpg',
+  'expense-report': '/samples/sample-expense-report.png',
+  inventory: '/samples/sample-inventory.png',
+  'sales-report': '/samples/sample-sales-report.png',
+};
+
 interface TemplateSelectorProps {
   templates: Template[];
   selectedTemplate: string;
   onSelectTemplate: (templateId: string) => void;
   isPro: boolean;
   onUpgradeClick?: () => void;
+  onTrySample?: (templateId: string, sampleUrl: string) => void;
 }
 
 const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -45,7 +56,8 @@ export default function TemplateSelector({
   selectedTemplate,
   onSelectTemplate,
   isPro,
-  onUpgradeClick
+  onUpgradeClick,
+  onTrySample
 }: TemplateSelectorProps) {
   const [hoveredTemplate, setHoveredTemplate] = useState<string | null>(null);
 
@@ -58,6 +70,14 @@ export default function TemplateSelector({
       return;
     }
     onSelectTemplate(template.id);
+  };
+
+  const handleTrySample = (e: React.MouseEvent, template: Template) => {
+    e.stopPropagation();
+    const sampleUrl = sampleDocuments[template.id];
+    if (sampleUrl && onTrySample) {
+      onTrySample(template.id, sampleUrl);
+    }
   };
 
   return (
@@ -78,6 +98,7 @@ export default function TemplateSelector({
           const isSelected = selectedTemplate === template.id;
           const isLocked = template.isPro && !isPro;
           const isHovered = hoveredTemplate === template.id;
+          const hasSample = !!sampleDocuments[template.id];
 
           return (
             <Card
@@ -136,8 +157,21 @@ export default function TemplateSelector({
                   {template.description}
                 </p>
 
-                {/* Locked overlay */}
-                {isLocked && isHovered && (
+                {/* Try Sample button for Pro templates (visible to non-Pro users) */}
+                {template.isPro && !isPro && hasSample && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full mt-3 gap-2 text-xs h-8 border-primary/50 text-primary hover:bg-primary/10"
+                    onClick={(e) => handleTrySample(e, template)}
+                  >
+                    <Play className="h-3 w-3" />
+                    Try with Sample
+                  </Button>
+                )}
+
+                {/* Locked overlay on hover */}
+                {isLocked && isHovered && !hasSample && (
                   <div className="absolute inset-0 bg-background/80 backdrop-blur-sm rounded-lg flex items-center justify-center">
                     <Button 
                       size="sm" 
@@ -187,6 +221,10 @@ export default function TemplateSelector({
                   Automatic validation & error detection
                 </li>
               </ul>
+              <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 flex items-center gap-2">
+                <Play className="h-3 w-3" />
+                Click "Try with Sample" on any Pro template to test it free!
+              </p>
             </div>
             <Button 
               size="sm"

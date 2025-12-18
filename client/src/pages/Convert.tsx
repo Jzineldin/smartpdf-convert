@@ -41,6 +41,7 @@ export default function Convert() {
   const [pageCount, setPageCount] = useState<number | undefined>(undefined);
   const [fileName, setFileName] = useState<string>('converted-tables');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('generic');
+  const [isTryingSample, setIsTryingSample] = useState<boolean>(false);
 
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
@@ -100,6 +101,77 @@ export default function Convert() {
       setError(err.message || 'An unexpected error occurred');
     }
   }, [usageData, processMutation]);
+
+  const handleTrySample = useCallback(async (templateId: string, sampleUrl: string) => {
+    setError(null);
+    setExtractedTables(null);
+    setWarnings([]);
+    setViewMode('preview');
+    setIsTryingSample(true);
+    setSelectedTemplate(templateId);
+    
+    // Get the sample file name from URL
+    const sampleFileName = sampleUrl.split('/').pop() || 'sample-document';
+    setFileName(sampleFileName);
+
+    setProcessingStep('upload');
+    toast.info(`Loading ${templateId.replace('-', ' ')} sample...`);
+
+    try {
+      // Fetch the sample image and convert to base64
+      const response = await fetch(sampleUrl);
+      const blob = await response.blob();
+      
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          // Remove data URL prefix to get just the base64
+          const base64Data = base64.split(',')[1] || base64;
+          resolve(base64Data);
+        };
+      });
+      reader.readAsDataURL(blob);
+      const base64 = await base64Promise;
+
+      setProcessingStep('analyze');
+
+      const result = await processMutation.mutateAsync({
+        fileBase64: base64,
+        fileName: sampleFileName,
+        fileSize: blob.size,
+        mimeType: blob.type || 'image/png',
+        templateId: templateId,
+        isSampleDemo: true, // Flag to bypass Pro check for samples
+      });
+
+      if (!result.success) {
+        setProcessingStep('error');
+        setError(result.error || 'Processing failed');
+        return;
+      }
+
+      setProcessingStep('extract');
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      setProcessingStep('verify');
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      setProcessingStep('ready');
+      setExtractedTables(result.tables || []);
+      setWarnings(result.warnings || []);
+      setConfidence(result.confidence || 0);
+      setConversionId(result.conversionId || null);
+      setPageCount(result.pageCount || undefined);
+
+      toast.success(`Sample processed! See what ${templateId.replace('-', ' ')} template can do.`);
+    } catch (err: any) {
+      setProcessingStep('error');
+      setError(err.message || 'An unexpected error occurred');
+    } finally {
+      setIsTryingSample(false);
+    }
+  }, [processMutation]);
 
   const handleReset = () => {
     setProcessingStep(null);
@@ -161,6 +233,7 @@ export default function Convert() {
                 onSelectTemplate={setSelectedTemplate}
                 isPro={templatesData.userIsPro}
                 onUpgradeClick={() => setLocation('/pricing')}
+                onTrySample={handleTrySample}
               />
             )}
             

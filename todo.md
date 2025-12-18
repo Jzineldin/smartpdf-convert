@@ -93,3 +93,9 @@
 - [x] Gate specialized templates behind Pro subscription
 - [x] Integrate template selection into conversion flow
 - [ ] Add confidence scoring display (Pro feature)
+
+## Try Sample Feature
+- [x] Create sample demo images for each Pro template (Invoice, Bank Statement, etc.)
+- [x] Add "Try Sample" button to template selector UI
+- [x] Implement sample loading and processing flow
+- [x] Allow non-Pro users to try Pro templates with sample documents only
