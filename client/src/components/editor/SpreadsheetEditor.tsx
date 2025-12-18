@@ -64,42 +64,64 @@ function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
 
 /**
  * Export FortuneSheet data to Excel file
+ * FortuneSheet can store data in two formats:
+ * 1. celldata array (initial format)
+ * 2. data 2D array (after editing)
  */
-async function exportToExcel(data: SheetData[], filename: string = "converted_data.xlsx") {
+async function exportToExcel(sheets: SheetData[], filename: string = "converted_data.xlsx") {
   const workbook = new ExcelJS.Workbook();
   
-  for (const sheet of data) {
+  for (const sheet of sheets) {
     const worksheet = workbook.addWorksheet(sheet.name || 'Sheet');
     
-    // Find max rows and cols
-    let maxRow = 0, maxCol = 0;
-    const celldata = sheet.celldata || [];
-    for (const cell of celldata) {
-      if (cell.r !== undefined && cell.r > maxRow) maxRow = cell.r;
-      if (cell.c !== undefined && cell.c > maxCol) maxCol = cell.c;
-    }
-    
-    // Write cells
-    for (const cell of celldata) {
-      if (cell.r === undefined || cell.c === undefined) continue;
-      const excelCell = worksheet.getCell(cell.r + 1, cell.c + 1);
-      const cellValue = cell.v;
-      
-      if (typeof cellValue === 'object' && cellValue !== null) {
-        excelCell.value = cellValue.v ?? '';
-        // Apply styles
-        if (cellValue.bl === 1) {
-          excelCell.font = { bold: true };
+    // FortuneSheet stores data in 'data' array after editing, or 'celldata' initially
+    if (sheet.data && Array.isArray(sheet.data)) {
+      // Handle 2D array format (after editing)
+      sheet.data.forEach((row: any[], rowIndex: number) => {
+        if (!row) return;
+        row.forEach((cell: any, colIndex: number) => {
+          if (cell === null || cell === undefined) return;
+          const excelCell = worksheet.getCell(rowIndex + 1, colIndex + 1);
+          
+          if (typeof cell === 'object' && cell !== null) {
+            excelCell.value = cell.v ?? cell.m ?? '';
+            if (cell.bl === 1) {
+              excelCell.font = { bold: true };
+            }
+            if (cell.bg) {
+              excelCell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: String(cell.bg).replace("#", "FF") }
+              };
+            }
+          } else {
+            excelCell.value = cell;
+          }
+        });
+      });
+    } else if (sheet.celldata && Array.isArray(sheet.celldata)) {
+      // Handle celldata format (initial)
+      for (const cell of sheet.celldata) {
+        if (cell.r === undefined || cell.c === undefined) continue;
+        const excelCell = worksheet.getCell(cell.r + 1, cell.c + 1);
+        const cellValue = cell.v;
+        
+        if (typeof cellValue === 'object' && cellValue !== null) {
+          excelCell.value = cellValue.v ?? '';
+          if (cellValue.bl === 1) {
+            excelCell.font = { bold: true };
+          }
+          if (cellValue.bg) {
+            excelCell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: String(cellValue.bg).replace("#", "FF") }
+            };
+          }
+        } else {
+          excelCell.value = cellValue ?? '';
         }
-        if (cellValue.bg) {
-          excelCell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: String(cellValue.bg).replace("#", "FF") }
-          };
-        }
-      } else {
-        excelCell.value = cellValue ?? '';
       }
     }
     
@@ -115,11 +137,29 @@ async function exportToExcel(data: SheetData[], filename: string = "converted_da
 
 /**
  * Copy all data to clipboard as tab-separated values
+ * Handles both FortuneSheet data formats
  */
-function copyToClipboard(data: SheetData[]) {
+function copyToClipboard(sheets: SheetData[]) {
   const allText: string[] = [];
   
-  for (const sheet of data) {
+  for (const sheet of sheets) {
+    // Handle 2D array format (after editing)
+    if (sheet.data && Array.isArray(sheet.data)) {
+      const rows: string[] = [];
+      sheet.data.forEach((row: any[]) => {
+        if (!row) return;
+        const cells = row.map((cell: any) => {
+          if (cell === null || cell === undefined) return '';
+          if (typeof cell === 'object') return String(cell.v ?? cell.m ?? '');
+          return String(cell);
+        });
+        rows.push(cells.join('\t'));
+      });
+      allText.push(`=== ${sheet.name || 'Sheet'} ===\n${rows.join('\n')}`);
+      continue;
+    }
+    
+    // Handle celldata format (initial)
     const celldata = sheet.celldata || [];
     
     // Find max rows and cols

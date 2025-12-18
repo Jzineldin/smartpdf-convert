@@ -81,3 +81,6 @@
 - [x] Add copy table to clipboard button
 - [x] Create conversion history page for logged-in users
 - [x] Push project to GitHub (https://github.com/Jzineldin/smartpdf-convert)
+
+## Bug Fix - Export Error
+- [x] Fix null check in exportToExcel - handle both celldata and data array formats from FortuneSheet
