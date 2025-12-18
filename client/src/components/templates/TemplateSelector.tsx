@@ -27,10 +27,10 @@ export interface Template {
 // Sample document paths for each Pro template
 const sampleDocuments: Record<string, string> = {
   invoice: '/samples/sample-invoice.webp',
-  'bank-statement': '/samples/sample-bank-statement.jpg',
-  'expense-report': '/samples/sample-expense-report.png',
+  bank_statement: '/samples/sample-bank-statement.jpg',
+  expense_report: '/samples/sample-expense-report.png',
   inventory: '/samples/sample-inventory.png',
-  'sales-report': '/samples/sample-sales-report.png',
+  sales_report: '/samples/sample-sales-report.png',
 };
 
 interface TemplateSelectorProps {
