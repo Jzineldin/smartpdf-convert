@@ -19,7 +19,7 @@ import {
   getTemplateBySlug,
   seedTemplates,
 } from "./db";
-import { extractTablesFromPDF } from "./lib/openrouter";
+import { extractTablesFromPDF, extractTablesFromMultiplePages } from "./lib/openrouter";
 import { validateImageBase64, convertPdfToImages } from "./lib/pdfToImage";
 import { tablesToExcel, spreadsheetDataToExcel } from "./lib/excel";
 import { createCheckoutSession, createPortalSession, getStripeConfig } from "./lib/stripe";
@@ -181,9 +181,10 @@ export const appRouter = router({
           let imageBase64 = input.fileBase64;
           let imageMimeType = actualMimeType;
           
+          // Handle PDF files - convert all pages and extract from each
           if (actualMimeType === 'application/pdf') {
             console.log('Converting PDF to images...');
-            const pdfConversion = await convertPdfToImages(input.fileBase64, 5); // Max 5 pages
+            const pdfConversion = await convertPdfToImages(input.fileBase64, 10); // Max 10 pages
             
             if (!pdfConversion.success || pdfConversion.pages.length === 0) {
               await updateConversion(conversion.id, {
@@ -200,13 +201,63 @@ export const appRouter = router({
               };
             }
             
-            // Use the first page for now (we can extend to multi-page later)
-            imageBase64 = pdfConversion.pages[0].base64;
-            imageMimeType = 'image/png';
-            console.log(`PDF converted successfully, ${pdfConversion.totalPages} page(s)`);
+            console.log(`PDF converted successfully, processing ${pdfConversion.totalPages} page(s)...`);
+            
+            // Extract tables from all pages
+            const pages = pdfConversion.pages.map(p => ({
+              pageNumber: p.pageNumber,
+              base64: p.base64,
+              mimeType: 'image/png',
+            }));
+            
+            const result = await extractTablesFromMultiplePages(pages, input.fileName);
+            
+            if (!result.success) {
+              await updateConversion(conversion.id, {
+                status: 'failed',
+                errorCode: result.errorCode,
+                errorMessage: result.error,
+              });
+
+              return {
+                success: false,
+                conversionId: conversion.id,
+                error: result.error,
+                errorCode: result.errorCode,
+              };
+            }
+
+            // Update conversion with multi-page results
+            await updateConversion(conversion.id, {
+              status: 'review',
+              extractedTables: result.tables,
+              tableCount: result.tables.length,
+              rowCount: result.tables.reduce((sum, t) => sum + t.rows.length, 0),
+              processingTimeMs: result.processingTime,
+              aiConfidenceScore: String(result.confidence),
+              aiWarnings: result.warnings,
+              pageCount: pdfConversion.totalPages,
+            });
+
+            // Increment usage
+            if (ctx.user) {
+              await incrementUserUsage(ctx.user.id);
+            } else {
+              await incrementAnonymousUsage(ip);
+            }
+
+            return {
+              success: true,
+              conversionId: conversion.id,
+              tables: result.tables,
+              warnings: result.warnings,
+              confidence: result.confidence,
+              processingTime: result.processingTime,
+              pageCount: pdfConversion.totalPages,
+            };
           }
           
-          // Extract tables using AI
+          // For non-PDF files (images), extract directly
           const result = await extractTablesFromPDF(
             imageBase64,
             input.fileName,

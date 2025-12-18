@@ -1,18 +1,21 @@
-import { CheckCircle, Circle, Loader2, AlertTriangle } from 'lucide-react';
+import { CheckCircle, Circle, Loader2, AlertTriangle, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Progress } from '@/components/ui/progress';
 
-export type ProcessingStep = 'upload' | 'analyze' | 'extract' | 'verify' | 'ready' | 'error';
+export type ProcessingStep = 'upload' | 'convert' | 'analyze' | 'extract' | 'verify' | 'ready' | 'error';
 
 interface ProcessingStatusProps {
   currentStep: ProcessingStep;
   error?: string;
   progress?: number;
+  pageCount?: number;
+  currentPage?: number;
 }
 
 const STEPS = [
   { id: 'upload', label: 'Uploading', description: 'Sending your file to our secure servers' },
-  { id: 'analyze', label: 'Analyzing', description: 'AI is scanning your PDF for tables' },
+  { id: 'convert', label: 'Converting', description: 'Converting PDF pages to images' },
+  { id: 'analyze', label: 'Analyzing', description: 'AI is scanning for tables' },
   { id: 'extract', label: 'Extracting', description: 'Reading and structuring table data' },
   { id: 'verify', label: 'Verifying', description: 'Checking for potential issues' },
   { id: 'ready', label: 'Ready', description: 'Your data is ready to edit' },
@@ -24,9 +27,17 @@ const PROCESSING_FACTS = [
   "Even scanned documents from the 1990s work great",
   "The average conversion takes about 15 seconds",
   "Your files are automatically deleted after 7 days",
+  "Multi-page PDFs are processed page by page for accuracy",
+  "Each page is analyzed independently for best results",
 ];
 
-export default function ProcessingStatus({ currentStep, error, progress }: ProcessingStatusProps) {
+export default function ProcessingStatus({ 
+  currentStep, 
+  error, 
+  progress,
+  pageCount,
+  currentPage 
+}: ProcessingStatusProps) {
   const currentStepIndex = STEPS.findIndex(s => s.id === currentStep);
   const randomFact = PROCESSING_FACTS[Math.floor(Math.random() * PROCESSING_FACTS.length)];
 
@@ -52,11 +63,35 @@ export default function ProcessingStatus({ currentStep, error, progress }: Proce
         <div className="w-16 h-16 mx-auto bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
           <Loader2 className="h-8 w-8 text-blue-600 animate-spin" />
         </div>
-        <h3 className="text-lg font-semibold">Processing your PDF...</h3>
-        <p className="text-sm text-muted-foreground">This usually takes 10-30 seconds</p>
+        <h3 className="text-lg font-semibold">Processing your file...</h3>
+        <p className="text-sm text-muted-foreground">
+          {pageCount && pageCount > 1 
+            ? `Processing ${pageCount} pages - this may take a minute`
+            : 'This usually takes 10-30 seconds'
+          }
+        </p>
       </div>
 
-      {progress !== undefined && (
+      {/* Multi-page progress indicator */}
+      {pageCount && pageCount > 1 && currentPage && (
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-blue-600" />
+              <span className="font-medium">Page Progress</span>
+            </span>
+            <span className="text-blue-600 font-medium">
+              {currentPage} of {pageCount}
+            </span>
+          </div>
+          <Progress value={(currentPage / pageCount) * 100} className="h-2" />
+          <p className="text-xs text-muted-foreground text-center">
+            Extracting tables from page {currentPage}...
+          </p>
+        </div>
+      )}
+
+      {progress !== undefined && !pageCount && (
         <Progress value={progress} className="h-2" />
       )}
 
@@ -65,6 +100,11 @@ export default function ProcessingStatus({ currentStep, error, progress }: Proce
           const isCompleted = index < currentStepIndex;
           const isCurrent = index === currentStepIndex;
           const isPending = index > currentStepIndex;
+
+          // Skip 'convert' step for non-PDF files
+          if (step.id === 'convert' && !pageCount) {
+            return null;
+          }
 
           return (
             <div
@@ -91,6 +131,11 @@ export default function ProcessingStatus({ currentStep, error, progress }: Proce
                   isPending && 'text-muted-foreground'
                 )}>
                   {step.label}
+                  {step.id === 'analyze' && pageCount && pageCount > 1 && currentPage && (
+                    <span className="ml-2 text-xs text-blue-600">
+                      (Page {currentPage}/{pageCount})
+                    </span>
+                  )}
                 </p>
                 {isCurrent && (
                   <p className="text-xs text-muted-foreground">{step.description}</p>

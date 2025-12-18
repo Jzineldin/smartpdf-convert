@@ -30,13 +30,17 @@ const SYSTEM_PROMPT = `You are a precise data extraction AI. Your job is to extr
 
 CRITICAL RULES:
 1. Extract EVERY table you see, even partial ones
-2. Preserve exact values - do not modify numbers, dates, or text
-3. If a cell is empty, use null
-4. If you're unsure about a value, include it with your best guess and flag it in warnings
-5. Detect the header row - it's usually the first row with column names
-6. Handle merged cells by repeating the value or leaving subsequent cells null
-7. Normalize date formats to ISO (YYYY-MM-DD) when clearly identifiable
-8. Keep currency symbols with their values
+2. PRESERVE EXACT VALUES - copy text EXACTLY as it appears, character for character
+3. DO NOT normalize, modify, or "fix" any values:
+   - Keep dates exactly as shown (e.g., "2018-03-01" stays "2018-03-01", not "2018-03")
+   - Keep currency formats exactly (e.g., "46000:-" stays "46000:-", not "46000+" or "46000")
+   - Keep number formats exactly (e.g., "1,234.56" or "1.234,56" - preserve the original)
+   - Keep special characters exactly as they appear (:-  +  %  etc.)
+4. If a cell is empty, use null
+5. If you're unsure about a value, include your best guess but flag it in warnings
+6. Detect the header row - it's usually the first row with column names
+7. Handle merged cells by repeating the value or leaving subsequent cells null
+8. Keep all currency symbols, suffixes, and formatting with their values
 
 OUTPUT FORMAT:
 {
@@ -71,6 +75,87 @@ WARNING TYPES:
 - partial_table: Table appears cut off or continues on another page
 - mixed_languages: Multiple languages detected
 - inconsistent_format: Dates, numbers, or currencies in inconsistent formats`;
+
+/**
+ * Extract tables from multiple pages and combine results
+ */
+export async function extractTablesFromMultiplePages(
+  pages: { pageNumber: number; base64: string; mimeType: string }[],
+  fileName: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<ExtractionResult> {
+  const startTime = Date.now();
+  const allTables: ExtractedTable[] = [];
+  const allWarnings: AIWarning[] = [];
+  let totalConfidence = 0;
+  let successfulPages = 0;
+
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    console.log(`Processing page ${page.pageNumber} of ${pages.length}...`);
+    
+    if (onProgress) {
+      onProgress(i + 1, pages.length);
+    }
+
+    const result = await extractTablesFromPDF(
+      page.base64,
+      `${fileName} (Page ${page.pageNumber})`,
+      page.mimeType
+    );
+
+    if (result.success) {
+      // Update page numbers in tables
+      const tablesWithPageNum = result.tables.map(table => ({
+        ...table,
+        pageNumber: page.pageNumber,
+        sheetName: pages.length > 1 
+          ? `${table.sheetName} (Page ${page.pageNumber})`
+          : table.sheetName,
+      }));
+      
+      allTables.push(...tablesWithPageNum);
+      
+      // Update page numbers in warnings
+      const warningsWithPageNum = result.warnings.map(warning => ({
+        ...warning,
+        pageNumber: page.pageNumber,
+      }));
+      
+      allWarnings.push(...warningsWithPageNum);
+      totalConfidence += result.confidence;
+      successfulPages++;
+    } else {
+      // Add warning for failed page
+      allWarnings.push({
+        type: 'partial_table',
+        message: `Failed to extract tables from page ${page.pageNumber}: ${result.error}`,
+        pageNumber: page.pageNumber,
+        suggestion: 'Try uploading this page separately as an image',
+      });
+    }
+  }
+
+  if (allTables.length === 0) {
+    return {
+      success: false,
+      tables: [],
+      warnings: allWarnings,
+      confidence: 0,
+      processingTime: Date.now() - startTime,
+      error: 'No tables could be extracted from any page',
+      errorCode: 'NO_TABLES_FOUND',
+    };
+  }
+
+  return {
+    success: true,
+    tables: allTables,
+    warnings: allWarnings,
+    confidence: successfulPages > 0 ? totalConfidence / successfulPages : 0,
+    processingTime: Date.now() - startTime,
+  };
+}
 
 export async function extractTablesFromPDF(
   fileBase64: string,

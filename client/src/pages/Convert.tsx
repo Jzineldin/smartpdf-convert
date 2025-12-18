@@ -37,6 +37,7 @@ export default function Convert() {
   const [confidence, setConfidence] = useState<number>(0);
   const [conversionId, setConversionId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
+  const [pageCount, setPageCount] = useState<number | undefined>(undefined);
 
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
@@ -85,8 +86,10 @@ export default function Convert() {
       setWarnings(result.warnings || []);
       setConfidence(result.confidence || 0);
       setConversionId(result.conversionId || null);
+      setPageCount(result.pageCount || undefined);
 
-      toast.success(`Successfully extracted ${result.tables?.length || 0} table(s)!`);
+      const pageInfo = result.pageCount && result.pageCount > 1 ? ` from ${result.pageCount} pages` : '';
+      toast.success(`Successfully extracted ${result.tables?.length || 0} table(s)${pageInfo}!`);
     } catch (err: any) {
       setProcessingStep('error');
       setError(err.message || 'An unexpected error occurred');
@@ -128,6 +131,7 @@ export default function Convert() {
     setConfidence(0);
     setConversionId(null);
     setViewMode('preview');
+    setPageCount(undefined);
   };
 
   // Convert extracted tables to SheetData format for editor
@@ -203,7 +207,11 @@ export default function Convert() {
           {processingStep && processingStep !== 'ready' && (
             <Card>
               <CardContent className="py-12">
-                <ProcessingStatus currentStep={processingStep} error={error || undefined} />
+                <ProcessingStatus 
+                  currentStep={processingStep} 
+                  error={error || undefined}
+                  pageCount={pageCount}
+                />
                 {processingStep === 'error' && (
                   <div className="mt-6 text-center">
                     <Button onClick={handleReset}>

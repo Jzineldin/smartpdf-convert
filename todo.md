@@ -59,3 +59,14 @@
 - [x] Server-side PDF-to-image conversion for automatic PDF processing
 - [x] Update landing page text to reflect multi-format support
 - [x] Add PDF conversion helper with instructions for users
+
+## Multi-Page PDF Support
+- [x] Update PDF conversion to process all pages (up to 10)
+- [x] Modify AI extraction to handle multiple pages sequentially
+- [x] Combine extracted tables from all pages into single result
+- [x] Update UI to show multi-page processing progress
+
+## Bug Fixes - Data Extraction
+- [x] Fix date format preservation (2018-03-01 not 2018-03)
+- [x] Fix currency format preservation (46000:- not 46000+)
+- [x] Update AI prompt to preserve original formats exactly
