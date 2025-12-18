@@ -14,60 +14,60 @@ const PLANS = [
     name: 'Free',
     price: '$0',
     period: 'forever',
-    description: 'Perfect for occasional use',
+    description: 'Try it out, no credit card needed',
     features: [
       { text: '3 conversions per day', included: true },
+      { text: 'Generic table extraction', included: true },
       { text: 'Basic spreadsheet editor', included: true },
       { text: 'Excel export', included: true },
-      { text: 'Premium templates', included: false },
+      { text: 'Invoice & specialized templates', included: false },
       { text: 'Conversion history', included: false },
-      { text: 'Priority processing', included: false },
     ],
     cta: 'Current Plan',
     popular: false,
   },
   {
     name: 'Pro',
-    price: '$9',
+    price: '$29',
     period: '/month',
-    description: 'For power users and businesses',
+    description: 'For accountants & small businesses',
     features: [
-      { text: 'Unlimited conversions', included: true },
-      { text: 'Full spreadsheet editor', included: true },
-      { text: 'Excel export', included: true },
-      { text: 'All premium templates', included: true },
-      { text: 'Conversion history', included: true },
-      { text: 'Priority processing', included: true },
+      { text: '100 invoice extractions/month', included: true },
+      { text: 'Invoice template with line items', included: true },
+      { text: 'Bank statement extraction', included: true },
+      { text: 'All specialized templates', included: true },
+      { text: 'Confidence scoring', included: true },
+      { text: 'Conversion history & exports', included: true },
     ],
-    cta: 'Upgrade Now',
+    cta: 'Start Free Trial',
     popular: true,
   },
 ];
 
 const FAQ = [
   {
+    question: 'What\'s included in the 100 invoice extractions?',
+    answer: 'Each invoice you process counts as one extraction. Multi-page invoices count as one extraction. Unused extractions don\'t roll over to the next month.',
+  },
+  {
     question: 'What payment methods do you accept?',
     answer: 'We accept all major credit cards (Visa, Mastercard, American Express) through our secure payment processor, Stripe.',
   },
   {
-    question: 'Can I get a refund?',
-    answer: 'Yes! We offer a 7-day money-back guarantee. If you\'re not satisfied with Pro, contact us within 7 days of purchase for a full refund.',
+    question: 'Can I try Pro templates before subscribing?',
+    answer: 'Yes! Click "Try with Sample" on any Pro template to see the extraction quality with our demo documents. No credit card required.',
   },
   {
-    question: 'What happens when I hit my daily limit?',
-    answer: 'Free users are limited to 3 conversions per day. The limit resets at midnight UTC. You can upgrade to Pro for unlimited conversions anytime.',
-  },
-  {
-    question: 'Do you offer team or enterprise plans?',
-    answer: 'Not yet, but we\'re working on it! Contact us at support@smartpdfconvert.com if you\'re interested in a team plan.',
+    question: 'What happens when I hit my limit?',
+    answer: 'Free users get 3 conversions per day (resets at midnight UTC). Pro users get 100 invoice extractions per month. Need more? Contact us for custom plans.',
   },
   {
     question: 'Can I cancel anytime?',
-    answer: 'Absolutely! You can cancel your Pro subscription at any time from your dashboard. You\'ll continue to have access until the end of your billing period.',
+    answer: 'Absolutely! Cancel from your dashboard anytime. You\'ll keep access until the end of your billing period.',
   },
   {
     question: 'Is my data secure?',
-    answer: 'Yes! All files are encrypted in transit and at rest. We automatically delete your files after 7 days, and we never share your data with third parties.',
+    answer: 'Yes! All files are encrypted in transit and at rest. We automatically delete your files after processing. We never share your data.',
   },
 ];
 

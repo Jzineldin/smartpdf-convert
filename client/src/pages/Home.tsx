@@ -31,23 +31,23 @@ import { toast } from 'sonner';
 const FEATURES = [
   {
     icon: ScanText,
-    title: 'Scanned PDF Support',
-    description: 'Works on scanned documents, images, and even photos of tables.',
+    title: 'Invoice Line Items',
+    description: 'Extracts vendor, dates, line items, quantities, and totals automatically.',
   },
   {
     icon: Table2,
-    title: 'Multiple Tables',
-    description: 'Extracts all tables from your PDF, even across multiple pages.',
+    title: 'Bank Statements',
+    description: 'Pulls transactions, dates, amounts, and running balances from statements.',
   },
   {
     icon: Edit3,
-    title: 'Real Editor',
-    description: 'Review and edit extracted data in a real spreadsheet interface.',
+    title: 'Real Spreadsheet Editor',
+    description: 'Review and edit extracted data before exporting to Excel.',
   },
   {
     icon: Wand2,
-    title: 'Smart Cleanup',
-    description: 'AI automatically fixes formatting issues and normalizes data.',
+    title: 'AI Confidence Scoring',
+    description: 'Know exactly how accurate each extraction is before you use it.',
   },
 ];
 
@@ -71,19 +71,19 @@ const STEPS = [
 
 const TESTIMONIALS = [
   {
-    quote: "Finally something that works on our scanned invoices from the 90s!",
+    quote: "Finally something that works on our scanned invoices. Saves me 2 hours every week.",
     author: "Maria S.",
-    role: "Accounting Manager",
+    role: "Bookkeeper",
   },
   {
-    quote: "Saved me hours of manual data entry. The AI is surprisingly accurate.",
+    quote: "The invoice template extracts line items perfectly. No more manual data entry.",
     author: "James T.",
-    role: "Data Analyst",
+    role: "Accountant",
   },
   {
-    quote: "We process hundreds of PDFs weekly. This tool is a game-changer.",
+    quote: "We process 50+ invoices weekly. This tool paid for itself in the first week.",
     author: "Sarah K.",
-    role: "Operations Lead",
+    role: "Small Business Owner",
   },
 ];
 
@@ -199,12 +199,12 @@ export default function Home() {
               </Badge>
               
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">
-                Transform Any Table Into{' '}
-                <span className="text-blue-600">Clean Excel Data</span>
+                Extract Invoice Data Into{' '}
+                <span className="text-blue-600">Clean Excel</span>
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-                Upload PDFs, screenshots, or images. Our AI extracts tables from scanned documents, messy formatting, and complex layouts.
+                Upload invoices, bank statements, or any table. Our AI extracts line items, totals, and transactions into editable spreadsheets.
               </p>
 
               <div className="pt-8 max-w-lg mx-auto space-y-4">
@@ -291,7 +291,7 @@ export default function Home() {
               <Card>
                 <CardHeader className="text-center">
                   <CardTitle>Free</CardTitle>
-                  <CardDescription>Perfect for occasional use</CardDescription>
+                  <CardDescription>Try it out, no credit card</CardDescription>
                   <div className="pt-4">
                     <span className="text-4xl font-bold">$0</span>
                     <span className="text-muted-foreground">/forever</span>
@@ -305,7 +305,7 @@ export default function Home() {
                     </li>
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-green-500" />
-                      <span>Basic spreadsheet editor</span>
+                      <span>Generic table extraction</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-green-500" />
@@ -313,11 +313,11 @@ export default function Home() {
                     </li>
                     <li className="flex items-center gap-2 text-muted-foreground">
                       <X className="h-4 w-4" />
-                      <span>Premium templates</span>
+                      <span>Invoice & specialized templates</span>
                     </li>
                     <li className="flex items-center gap-2 text-muted-foreground">
                       <X className="h-4 w-4" />
-                      <span>Conversion history</span>
+                      <span>Confidence scoring</span>
                     </li>
                   </ul>
                 </CardContent>
@@ -335,9 +335,9 @@ export default function Home() {
                 </Badge>
                 <CardHeader className="text-center">
                   <CardTitle>Pro</CardTitle>
-                  <CardDescription>For power users and businesses</CardDescription>
+                  <CardDescription>For accountants & small businesses</CardDescription>
                   <div className="pt-4">
-                    <span className="text-4xl font-bold">$9</span>
+                    <span className="text-4xl font-bold">$29</span>
                     <span className="text-muted-foreground">/month</span>
                   </div>
                 </CardHeader>
@@ -345,23 +345,23 @@ export default function Home() {
                   <ul className="space-y-3">
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-green-500" />
-                      <span className="font-medium">Unlimited conversions</span>
+                      <span className="font-medium">100 invoice extractions/month</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-green-500" />
-                      <span>Full spreadsheet editor</span>
+                      <span>Invoice template with line items</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-green-500" />
-                      <span>All premium templates</span>
+                      <span>Bank statement extraction</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>Confidence scoring</span>
                     </li>
                     <li className="flex items-center gap-2">
                       <Check className="h-4 w-4 text-green-500" />
                       <span>Conversion history</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-green-500" />
-                      <span>Priority processing</span>
                     </li>
                   </ul>
                 </CardContent>

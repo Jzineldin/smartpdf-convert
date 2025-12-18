@@ -99,3 +99,9 @@
 - [x] Add "Try Sample" button to template selector UI
 - [x] Implement sample loading and processing flow
 - [x] Allow non-Pro users to try Pro templates with sample documents only
+
+## MVP Ship (Priority)
+- [x] Add confidence scoring display to extraction results
+- [x] Update pricing: Free (3/day generic) + Pro $29/month (100 invoices)
+- [x] Create invoice-focused landing page ("invoice to excel" / "extract invoice data")
+- [ ] Ship it

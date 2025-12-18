@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown } from 'lucide-react';
 import TemplateSelector from '@/components/templates/TemplateSelector';
+import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
 
 interface ExtractedTable {
@@ -294,6 +295,13 @@ export default function Convert() {
                 Convert Another
               </Button>
             </div>
+
+            {/* Confidence Score */}
+            <ConfidenceScore 
+              confidence={confidence} 
+              tableCount={extractedTables.length}
+              pageCount={pageCount}
+            />
 
             {/* Warnings */}
             {warnings.length > 0 && (
