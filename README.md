@@ -18,7 +18,7 @@ AI-powered SaaS application that extracts invoice data, bank statements, and tab
 
 - **Frontend**: React 19, TypeScript, Tailwind CSS 4, Vite
 - **Backend**: Express 4, tRPC 11, Node.js
-- **Database**: Supabase PostgreSQL with Drizzle ORM
+- **Database**: MySQL with Drizzle ORM
 - **Authentication**: Supabase Auth (email/password + Google OAuth)
 - **AI**: GPT-4 Vision via OpenRouter API
 - **Payments**: Stripe (Live mode)
@@ -38,10 +38,10 @@ Before you start, make sure you have:
 Create a `.env` file in the root directory with these variables:
 
 ```env
-# Database
-DATABASE_URL=your_supabase_connection_string
+# Database (MySQL)
+DATABASE_URL=mysql://username:password@host:3306/database_name
 
-# Supabase
+# Supabase Auth (for authentication only)
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
@@ -201,9 +201,10 @@ node --version  # Should be v18+
 ### Issue: Database connection fails
 
 **Solution**:
-- Verify `DATABASE_URL` in `.env` is correct
-- Ensure Supabase project is active
-- Check that your IP is whitelisted in Supabase (if applicable)
+- Verify `DATABASE_URL` format: `mysql://user:password@host:port/dbname`
+- Ensure MySQL server is running
+- Check credentials are correct
+- Verify database exists
 - Try: `pnpm db:push --force`
 
 ### Issue: OpenRouter API errors during extraction
