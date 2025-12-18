@@ -45,3 +45,9 @@
 - [x] Responsive design for mobile
 - [x] Error handling and user feedback
 - [x] Loading states and skeletons
+
+
+## New Features (In Progress)
+- [x] Stripe webhook endpoint for subscription events
+- [x] Real-time spreadsheet editor for reviewing/editing extracted data
+- [x] Google OAuth configuration instructions

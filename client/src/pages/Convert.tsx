@@ -4,10 +4,12 @@ import { trpc } from '@/lib/trpc';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import DropZone from '@/components/upload/DropZone';
 import ProcessingStatus, { ProcessingStep } from '@/components/upload/ProcessingStatus';
+import SpreadsheetEditor, { SheetData } from '@/components/editor/SpreadsheetEditor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, Download, RotateCcw } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, Download, RotateCcw, Edit3, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ExtractedTable {
@@ -34,6 +36,7 @@ export default function Convert() {
   const [warnings, setWarnings] = useState<AIWarning[]>([]);
   const [confidence, setConfidence] = useState<number>(0);
   const [conversionId, setConversionId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
 
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
@@ -43,6 +46,7 @@ export default function Convert() {
     setError(null);
     setExtractedTables(null);
     setWarnings([]);
+    setViewMode('preview');
     
     // Check usage limit
     if (usageData && !usageData.allowed) {
@@ -89,18 +93,18 @@ export default function Convert() {
     }
   }, [usageData, processMutation]);
 
-  const handleExport = async () => {
+  const handleExport = async (sheets?: { name: string; data: (string | number | null)[][] }[]) => {
     if (!extractedTables || extractedTables.length === 0) return;
 
     try {
-      const sheets = extractedTables.map(table => ({
+      const exportSheets = sheets || extractedTables.map(table => ({
         name: table.sheetName,
         data: [table.headers, ...table.rows] as (string | number | null)[][],
       }));
 
       const result = await exportMutation.mutateAsync({
         conversionId: conversionId || undefined,
-        sheets,
+        sheets: exportSheets,
         fileName: 'converted-tables',
       });
 
@@ -123,7 +127,15 @@ export default function Convert() {
     setWarnings([]);
     setConfidence(0);
     setConversionId(null);
+    setViewMode('preview');
   };
+
+  // Convert extracted tables to SheetData format for editor
+  const sheetsForEditor: SheetData[] = extractedTables?.map(table => ({
+    name: table.sheetName,
+    headers: table.headers,
+    rows: table.rows,
+  })) || [];
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -155,7 +167,7 @@ export default function Convert() {
       </header>
 
       <main className="container py-8">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           {/* Back button */}
           <Button variant="ghost" size="sm" className="mb-6" onClick={() => setLocation('/')}>
             <ArrowLeft className="h-4 w-4 mr-2" />
@@ -228,10 +240,12 @@ export default function Convert() {
                         <RotateCcw className="h-4 w-4 mr-2" />
                         New File
                       </Button>
-                      <Button size="sm" onClick={handleExport} disabled={exportMutation.isPending}>
-                        <Download className="h-4 w-4 mr-2" />
-                        Download Excel
-                      </Button>
+                      {viewMode === 'preview' && (
+                        <Button size="sm" onClick={() => handleExport()} disabled={exportMutation.isPending}>
+                          <Download className="h-4 w-4 mr-2" />
+                          Download Excel
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -261,54 +275,78 @@ export default function Convert() {
                 </Card>
               )}
 
-              {/* Tables preview */}
-              <div className="space-y-4">
-                {extractedTables.map((table, tableIndex) => (
-                  <Card key={tableIndex}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base">{table.sheetName}</CardTitle>
-                        <Badge variant="secondary">
-                          {table.rows.length} rows • Page {table.pageNumber}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b bg-muted/50">
-                              {table.headers.map((header, i) => (
-                                <th key={i} className="px-3 py-2 text-left font-medium">
-                                  {header}
-                                </th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {table.rows.slice(0, 5).map((row, rowIndex) => (
-                              <tr key={rowIndex} className="border-b">
-                                {row.map((cell, cellIndex) => (
-                                  <td key={cellIndex} className="px-3 py-2">
-                                    {cell ?? '—'}
-                                  </td>
+              {/* View mode tabs */}
+              <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'preview' | 'edit')}>
+                <TabsList className="grid w-full max-w-xs grid-cols-2">
+                  <TabsTrigger value="preview" className="flex items-center gap-2">
+                    <Eye className="h-4 w-4" />
+                    Preview
+                  </TabsTrigger>
+                  <TabsTrigger value="edit" className="flex items-center gap-2">
+                    <Edit3 className="h-4 w-4" />
+                    Edit
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="preview" className="mt-4">
+                  {/* Tables preview */}
+                  <div className="space-y-4">
+                    {extractedTables.map((table, tableIndex) => (
+                      <Card key={tableIndex}>
+                        <CardHeader className="pb-2">
+                          <div className="flex items-center justify-between">
+                            <CardTitle className="text-base">{table.sheetName}</CardTitle>
+                            <Badge variant="secondary">
+                              {table.rows.length} rows • Page {table.pageNumber}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b bg-muted/50">
+                                  {table.headers.map((header, i) => (
+                                    <th key={i} className="px-3 py-2 text-left font-medium">
+                                      {header}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {table.rows.slice(0, 5).map((row, rowIndex) => (
+                                  <tr key={rowIndex} className="border-b">
+                                    {row.map((cell, cellIndex) => (
+                                      <td key={cellIndex} className="px-3 py-2">
+                                        {cell ?? '—'}
+                                      </td>
+                                    ))}
+                                  </tr>
                                 ))}
-                              </tr>
-                            ))}
-                            {table.rows.length > 5 && (
-                              <tr>
-                                <td colSpan={table.headers.length} className="px-3 py-2 text-center text-muted-foreground">
-                                  ... and {table.rows.length - 5} more rows
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+                                {table.rows.length > 5 && (
+                                  <tr>
+                                    <td colSpan={table.headers.length} className="px-3 py-2 text-center text-muted-foreground">
+                                      ... and {table.rows.length - 5} more rows
+                                    </td>
+                                  </tr>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="edit" className="mt-4">
+                  <SpreadsheetEditor
+                    initialData={sheetsForEditor}
+                    onExport={handleExport}
+                    isExporting={exportMutation.isPending}
+                  />
+                </TabsContent>
+              </Tabs>
 
               {/* Upgrade CTA for free users */}
               {usageData && usageData.remaining !== -1 && usageData.remaining <= 1 && (
