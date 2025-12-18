@@ -70,3 +70,7 @@
 - [x] Fix date format preservation (2018-03-01 not 2018-03)
 - [x] Fix currency format preservation (46000:- not 46000+)
 - [x] Update AI prompt to preserve original formats exactly
+
+## Bug Fix - Page Count Detection
+- [x] Fix PDF page count detection to only process existing pages
+- [x] Remove false warnings about non-existent pages (3-10 on a 2-page PDF)

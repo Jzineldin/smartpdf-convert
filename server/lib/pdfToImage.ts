@@ -1,4 +1,5 @@
 import { fromBuffer } from 'pdf2pic';
+import { PDFDocument } from 'pdf-lib';
 import sharp from 'sharp';
 
 export interface ConvertedPage {
@@ -17,6 +18,19 @@ export interface PdfConversionResult {
 }
 
 /**
+ * Get the actual page count from a PDF using pdf-lib
+ */
+async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> {
+  try {
+    const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+    return pdfDoc.getPageCount();
+  } catch (error) {
+    console.error('Error getting PDF page count:', error);
+    return 0;
+  }
+}
+
+/**
  * Convert PDF pages to PNG images using pdf2pic (GraphicsMagick/Ghostscript)
  */
 export async function convertPdfToImages(pdfBase64: string, maxPages: number = 10): Promise<PdfConversionResult> {
@@ -32,6 +46,22 @@ export async function convertPdfToImages(pdfBase64: string, maxPages: number = 1
     
     console.log(`Converting PDF to images, buffer size: ${pdfBuffer.length} bytes`);
 
+    // Get actual page count from PDF
+    const actualPageCount = await getPdfPageCount(pdfBuffer);
+    console.log(`PDF has ${actualPageCount} page(s)`);
+
+    if (actualPageCount === 0) {
+      return {
+        success: false,
+        pages: [],
+        totalPages: 0,
+        error: 'Could not read PDF. The file may be corrupted or password-protected.',
+      };
+    }
+
+    // Only process up to the actual page count or maxPages, whichever is smaller
+    const pagesToProcess = Math.min(actualPageCount, maxPages);
+
     // Configure pdf2pic
     const options = {
       density: 150, // DPI - higher = better quality but larger files
@@ -44,36 +74,24 @@ export async function convertPdfToImages(pdfBase64: string, maxPages: number = 1
 
     const converter = fromBuffer(pdfBuffer, options);
     
-    // Get total page count by trying to convert first
     const pages: ConvertedPage[] = [];
-    let pageNum = 1;
     
-    while (pageNum <= maxPages) {
+    // Process only existing pages
+    for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
       try {
         const result = await converter(pageNum, { responseType: 'base64' });
         
-        if (!result || !result.base64) {
-          // No more pages
-          break;
+        if (result && result.base64) {
+          pages.push({
+            pageNumber: pageNum,
+            base64: result.base64,
+            mimeType: 'image/png',
+          });
+          console.log(`Converted page ${pageNum} of ${actualPageCount}`);
         }
-
-        pages.push({
-          pageNumber: pageNum,
-          base64: result.base64,
-          mimeType: 'image/png',
-        });
-
-        console.log(`Converted page ${pageNum}`);
-        pageNum++;
       } catch (pageError: any) {
-        // Check if it's a "page doesn't exist" error or actual error
-        if (pageError.message?.includes('requested FirstPage') || 
-            pageError.message?.includes('no pages') ||
-            pageNum > 1) {
-          // We've reached the end of the document
-          break;
-        }
-        throw pageError;
+        console.error(`Error converting page ${pageNum}:`, pageError.message);
+        // Continue with other pages even if one fails
       }
     }
 
@@ -81,15 +99,15 @@ export async function convertPdfToImages(pdfBase64: string, maxPages: number = 1
       return {
         success: false,
         pages: [],
-        totalPages: 0,
-        error: 'Could not extract any pages from the PDF. The file may be corrupted or password-protected.',
+        totalPages: actualPageCount,
+        error: 'Could not extract any pages from the PDF. The file may be corrupted or use unsupported features.',
       };
     }
 
     return {
       success: true,
       pages,
-      totalPages: pages.length,
+      totalPages: actualPageCount,
     };
   } catch (error: any) {
     console.error('PDF conversion error:', error);
