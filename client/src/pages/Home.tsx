@@ -1,31 +1,476 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
-import { getLoginUrl } from "@/const";
-import { Streamdown } from 'streamdown';
+import { Link, useLocation } from 'wouter';
+import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
+import { trpc } from '@/lib/trpc';
+import DropZone from '@/components/upload/DropZone';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import {
+  FileSpreadsheet,
+  Upload,
+  Sparkles,
+  Download,
+  ScanText,
+  Table2,
+  Edit3,
+  Wand2,
+  Check,
+  X,
+  Zap,
+  Shield,
+  Clock,
+  Star,
+  ArrowRight,
+  Menu,
+} from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
 
-/**
- * All content in this page are only for example, replace with your own feature implementation
- * When building pages, remember your instructions in Frontend Workflow, Frontend Best Practices, Design Guide and Common Pitfalls
- */
+const FEATURES = [
+  {
+    icon: ScanText,
+    title: 'Scanned PDF Support',
+    description: 'Works on scanned documents, images, and even photos of tables.',
+  },
+  {
+    icon: Table2,
+    title: 'Multiple Tables',
+    description: 'Extracts all tables from your PDF, even across multiple pages.',
+  },
+  {
+    icon: Edit3,
+    title: 'Real Editor',
+    description: 'Review and edit extracted data in a real spreadsheet interface.',
+  },
+  {
+    icon: Wand2,
+    title: 'Smart Cleanup',
+    description: 'AI automatically fixes formatting issues and normalizes data.',
+  },
+];
+
+const STEPS = [
+  {
+    number: '1',
+    title: 'Upload',
+    description: 'Drop your PDF file or click to browse',
+  },
+  {
+    number: '2',
+    title: 'AI Extracts',
+    description: 'Our AI analyzes and extracts every table',
+  },
+  {
+    number: '3',
+    title: 'Download',
+    description: 'Edit if needed and export as Excel',
+  },
+];
+
+const TESTIMONIALS = [
+  {
+    quote: "Finally something that works on our scanned invoices from the 90s!",
+    author: "Maria S.",
+    role: "Accounting Manager",
+  },
+  {
+    quote: "Saved me hours of manual data entry. The AI is surprisingly accurate.",
+    author: "James T.",
+    role: "Data Analyst",
+  },
+  {
+    quote: "We process hundreds of PDFs weekly. This tool is a game-changer.",
+    author: "Sarah K.",
+    role: "Operations Lead",
+  },
+];
+
+const FAQ = [
+  {
+    question: 'What file types are supported?',
+    answer: 'Currently we support PDF files up to 20MB. The PDF can contain scanned images, digital text, or a mix of both.',
+  },
+  {
+    question: 'How accurate is the extraction?',
+    answer: 'Our AI achieves 90-99% accuracy on most documents. Complex layouts, handwriting, or very low-resolution scans may have lower accuracy, but we always show confidence scores and warnings.',
+  },
+  {
+    question: 'Is my data secure?',
+    answer: 'Yes! All files are encrypted in transit and at rest. We automatically delete your files after 7 days, and we never share your data with third parties.',
+  },
+  {
+    question: 'Can I cancel anytime?',
+    answer: 'Absolutely! You can cancel your Pro subscription at any time from your dashboard. You\'ll continue to have access until the end of your billing period.',
+  },
+];
+
 export default function Home() {
-  // The userAuth hooks provides authentication state
-  // To implement login/logout functionality, simply call logout() or redirect to getLoginUrl()
-  let { user, loading, error, isAuthenticated, logout } = useAuth();
+  const [, setLocation] = useLocation();
+  const { isAuthenticated } = useSupabaseAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // If theme is switchable in App.tsx, we can implement theme toggling like this:
-  // const { theme, toggleTheme } = useTheme();
+  const handleFileSelect = (file: File, base64: string) => {
+    // Store in sessionStorage and redirect to convert page
+    sessionStorage.setItem('pendingFile', JSON.stringify({
+      name: file.name,
+      size: file.size,
+      base64,
+    }));
+    setLocation('/convert');
+  };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen bg-white dark:bg-gray-900">
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b">
+        <div className="container py-4 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-2">
+            <FileSpreadsheet className="h-7 w-7 text-blue-600" />
+            <span className="font-bold text-xl">SmartPDF Convert</span>
+          </Link>
+          
+          {/* Desktop nav */}
+          <nav className="hidden md:flex items-center gap-6">
+            <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+              Features
+            </a>
+            <a href="#pricing" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+              Pricing
+            </a>
+            <a href="#faq" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+              FAQ
+            </a>
+          </nav>
+
+          <div className="hidden md:flex items-center gap-3">
+            {isAuthenticated ? (
+              <Button onClick={() => setLocation('/dashboard')}>Dashboard</Button>
+            ) : (
+              <>
+                <Button variant="ghost" onClick={() => setLocation('/login')}>
+                  Sign in
+                </Button>
+                <Button onClick={() => setLocation('/signup')}>
+                  Get Started
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Mobile menu button */}
+          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+            <Menu className="h-5 w-5" />
+          </Button>
+        </div>
+
+        {/* Mobile menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t bg-white dark:bg-gray-900 p-4 space-y-4">
+            <a href="#features" className="block text-sm font-medium">Features</a>
+            <a href="#pricing" className="block text-sm font-medium">Pricing</a>
+            <a href="#faq" className="block text-sm font-medium">FAQ</a>
+            <div className="pt-4 border-t space-y-2">
+              {isAuthenticated ? (
+                <Button className="w-full" onClick={() => setLocation('/dashboard')}>Dashboard</Button>
+              ) : (
+                <>
+                  <Button variant="outline" className="w-full" onClick={() => setLocation('/login')}>Sign in</Button>
+                  <Button className="w-full" onClick={() => setLocation('/signup')}>Get Started</Button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </header>
+
       <main>
-        {/* Example: lucide-react for icons */}
-        <Loader2 className="animate-spin" />
-        Example Page
-        {/* Example: Streamdown for markdown rendering */}
-        <Streamdown>Any **markdown** content</Streamdown>
-        <Button variant="default">Example Button</Button>
+        {/* Hero Section */}
+        <section className="relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800" />
+          <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZyBmaWxsPSJub25lIiBmaWxsLXJ1bGU9ImV2ZW5vZGQiPjxnIGZpbGw9IiMzQjgyRjYiIGZpbGwtb3BhY2l0eT0iMC4wNCI+PGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMiIvPjwvZz48L2c+PC9zdmc+')] opacity-50" />
+          
+          <div className="container relative py-20 md:py-32">
+            <div className="max-w-3xl mx-auto text-center space-y-6">
+              <Badge variant="secondary" className="mb-4">
+                <Sparkles className="h-3 w-3 mr-1" />
+                AI-Powered Extraction
+              </Badge>
+              
+              <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">
+                Transform Any PDF Table Into{' '}
+                <span className="text-blue-600">Clean Excel Data</span>
+              </h1>
+              
+              <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
+                AI-powered extraction that actually works on scanned documents, messy formatting, and complex layouts.
+              </p>
+
+              <div className="pt-8 max-w-lg mx-auto">
+                <DropZone onFileSelect={handleFileSelect} />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground pt-4">
+                <span className="flex items-center gap-1">
+                  <Check className="h-4 w-4 text-green-500" />
+                  3 free conversions/day
+                </span>
+                <span className="flex items-center gap-1">
+                  <Check className="h-4 w-4 text-green-500" />
+                  No signup required
+                </span>
+                <span className="flex items-center gap-1">
+                  <Check className="h-4 w-4 text-green-500" />
+                  Instant results
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* How It Works */}
+        <section className="py-20 bg-gray-50 dark:bg-gray-800/50">
+          <div className="container">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold mb-4">How It Works</h2>
+              <p className="text-muted-foreground">Three simple steps to extract your data</p>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+              {STEPS.map((step, index) => (
+                <div key={index} className="text-center">
+                  <div className="w-16 h-16 mx-auto mb-4 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                    <span className="text-2xl font-bold text-blue-600">{step.number}</span>
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">{step.title}</h3>
+                  <p className="text-sm text-muted-foreground">{step.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Features */}
+        <section id="features" className="py-20">
+          <div className="container">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold mb-4">Powerful Features</h2>
+              <p className="text-muted-foreground">Everything you need to extract tables from PDFs</p>
+            </div>
+
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 max-w-6xl mx-auto">
+              {FEATURES.map((feature, index) => (
+                <Card key={index} className="text-center hover:shadow-lg transition-shadow">
+                  <CardHeader>
+                    <div className="w-12 h-12 mx-auto mb-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
+                      <feature.icon className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <CardTitle className="text-lg">{feature.title}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">{feature.description}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Pricing */}
+        <section id="pricing" className="py-20 bg-gray-50 dark:bg-gray-800/50">
+          <div className="container">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold mb-4">Simple Pricing</h2>
+              <p className="text-muted-foreground">Start free. Upgrade when you need more.</p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+              {/* Free Plan */}
+              <Card>
+                <CardHeader className="text-center">
+                  <CardTitle>Free</CardTitle>
+                  <CardDescription>Perfect for occasional use</CardDescription>
+                  <div className="pt-4">
+                    <span className="text-4xl font-bold">$0</span>
+                    <span className="text-muted-foreground">/forever</span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-3">
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>3 conversions per day</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>Basic spreadsheet editor</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>Excel export</span>
+                    </li>
+                    <li className="flex items-center gap-2 text-muted-foreground">
+                      <X className="h-4 w-4" />
+                      <span>Premium templates</span>
+                    </li>
+                    <li className="flex items-center gap-2 text-muted-foreground">
+                      <X className="h-4 w-4" />
+                      <span>Conversion history</span>
+                    </li>
+                  </ul>
+                </CardContent>
+                <CardFooter>
+                  <Button variant="outline" className="w-full" onClick={() => setLocation('/convert')}>
+                    Get Started
+                  </Button>
+                </CardFooter>
+              </Card>
+
+              {/* Pro Plan */}
+              <Card className="border-blue-500 shadow-lg relative">
+                <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 bg-blue-600">
+                  Most Popular
+                </Badge>
+                <CardHeader className="text-center">
+                  <CardTitle>Pro</CardTitle>
+                  <CardDescription>For power users and businesses</CardDescription>
+                  <div className="pt-4">
+                    <span className="text-4xl font-bold">$9</span>
+                    <span className="text-muted-foreground">/month</span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-3">
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span className="font-medium">Unlimited conversions</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>Full spreadsheet editor</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>All premium templates</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>Conversion history</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span>Priority processing</span>
+                    </li>
+                  </ul>
+                </CardContent>
+                <CardFooter>
+                  <Button className="w-full" onClick={() => setLocation('/pricing')}>
+                    <Zap className="h-4 w-4 mr-2" />
+                    Upgrade to Pro
+                  </Button>
+                </CardFooter>
+              </Card>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-8 mt-8 text-sm text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <Shield className="h-4 w-4" />
+                Secure payment via Stripe
+              </span>
+              <span className="flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                7-day money-back guarantee
+              </span>
+            </div>
+          </div>
+        </section>
+
+        {/* Testimonials */}
+        <section className="py-20">
+          <div className="container">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold mb-4">Loved by Thousands</h2>
+              <p className="text-muted-foreground">See what our users are saying</p>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+              {TESTIMONIALS.map((testimonial, index) => (
+                <Card key={index}>
+                  <CardContent className="pt-6">
+                    <div className="flex gap-1 mb-4">
+                      {[...Array(5)].map((_, i) => (
+                        <Star key={i} className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                      ))}
+                    </div>
+                    <p className="text-muted-foreground mb-4">"{testimonial.quote}"</p>
+                    <div>
+                      <p className="font-medium">{testimonial.author}</p>
+                      <p className="text-sm text-muted-foreground">{testimonial.role}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* FAQ */}
+        <section id="faq" className="py-20 bg-gray-50 dark:bg-gray-800/50">
+          <div className="container">
+            <div className="text-center mb-12">
+              <h2 className="text-3xl font-bold mb-4">Frequently Asked Questions</h2>
+              <p className="text-muted-foreground">Everything you need to know</p>
+            </div>
+
+            <div className="max-w-2xl mx-auto">
+              <Accordion type="single" collapsible className="w-full">
+                {FAQ.map((item, index) => (
+                  <AccordionItem key={index} value={`item-${index}`}>
+                    <AccordionTrigger className="text-left">{item.question}</AccordionTrigger>
+                    <AccordionContent className="text-muted-foreground">{item.answer}</AccordionContent>
+                  </AccordionItem>
+                ))}
+              </Accordion>
+            </div>
+          </div>
+        </section>
+
+        {/* CTA */}
+        <section className="py-20 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+          <div className="container text-center">
+            <h2 className="text-3xl font-bold mb-4">Ready to Extract Your Data?</h2>
+            <p className="text-blue-100 mb-8 max-w-xl mx-auto">
+              Start converting PDFs to Excel for free. No credit card required.
+            </p>
+            <Button size="lg" variant="secondary" onClick={() => setLocation('/convert')}>
+              Start Converting Now
+              <ArrowRight className="h-4 w-4 ml-2" />
+            </Button>
+          </div>
+        </section>
       </main>
+
+      {/* Footer */}
+      <footer className="border-t py-12">
+        <div className="container">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5 text-blue-600" />
+              <span className="font-semibold">SmartPDF Convert</span>
+            </div>
+            <nav className="flex flex-wrap items-center gap-6 text-sm text-muted-foreground">
+              <a href="#features" className="hover:text-foreground">Features</a>
+              <a href="#pricing" className="hover:text-foreground">Pricing</a>
+              <a href="#faq" className="hover:text-foreground">FAQ</a>
+              <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
+              <Link href="/terms" className="hover:text-foreground">Terms</Link>
+            </nav>
+            <p className="text-sm text-muted-foreground">
+              © 2024 SmartPDF Convert. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
