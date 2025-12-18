@@ -1,14 +1,17 @@
 import { eq, and, sql, desc } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import { InsertUser, users, conversions, anonymousUsage, templates, InsertConversion, Conversion, Template } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
+let _client: ReturnType<typeof postgres> | null = null;
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
+      _client = postgres(process.env.DATABASE_URL);
+      _db = drizzle(_client);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
       _db = null;
@@ -69,7 +72,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+    await db.insert(users).values(values).onConflictDoUpdate({
+      target: users.openId,
+      set: updateSet,
+    });
   } catch (error) {
     console.error("[Database] Failed to upsert user:", error);
     throw error;
@@ -142,7 +148,7 @@ export async function checkUserUsageLimit(userId: number): Promise<{ allowed: bo
     // Reset daily count
     await db.update(users).set({
       conversionsToday: 0,
-      lastUsageResetDate: new Date(today),
+      lastUsageResetDate: today,
     }).where(eq(users.id, userId));
     return { allowed: true, remaining: FREE_DAILY_LIMIT };
   }
@@ -170,7 +176,7 @@ export async function incrementUserUsage(userId: number) {
     conversionsThisMonth: sql`${users.conversionsThisMonth} + 1`,
     totalConversions: sql`${users.totalConversions} + 1`,
     lastConversionAt: new Date(),
-    lastUsageResetDate: new Date(today),
+    lastUsageResetDate: today,
   }).where(eq(users.id, userId));
 }
 
@@ -184,7 +190,7 @@ export async function checkAnonymousUsageLimit(ipAddress: string): Promise<{ all
     .from(anonymousUsage)
     .where(and(
       eq(anonymousUsage.ipAddress, ipAddress),
-      eq(anonymousUsage.usageDate, new Date(today))
+      eq(anonymousUsage.usageDate, today)
     ))
     .limit(1);
 
@@ -215,15 +221,15 @@ export async function incrementAnonymousUsage(ipAddress: string) {
     .set({ conversionCount: sql`${anonymousUsage.conversionCount} + 1` })
     .where(and(
       eq(anonymousUsage.ipAddress, ipAddress),
-      eq(anonymousUsage.usageDate, new Date(today))
-    ));
+      eq(anonymousUsage.usageDate, today)
+    ))
+    .returning({ id: anonymousUsage.id });
 
   // If no record was updated, insert a new one
-  // @ts-ignore - checking affected rows
-  if (!result[0]?.affectedRows) {
+  if (result.length === 0) {
     await db.insert(anonymousUsage).values({
       ipAddress,
-      usageDate: new Date(today),
+      usageDate: today,
       conversionCount: 1,
     });
   }
@@ -240,14 +246,9 @@ export async function createConversion(data: InsertConversion): Promise<Conversi
   const result = await db.insert(conversions).values({
     ...data,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-  });
+  }).returning();
 
-  // @ts-ignore
-  const insertId = result[0]?.insertId;
-  if (!insertId) return null;
-
-  const [conversion] = await db.select().from(conversions).where(eq(conversions.id, insertId));
-  return conversion || null;
+  return result[0] || null;
 }
 
 export async function updateConversion(id: number, data: Partial<InsertConversion>) {
@@ -315,7 +316,7 @@ export async function seedTemplates() {
       slug: 'invoice',
       description: 'Standard invoice format with item details, quantities, and totals',
       category: 'finance' as const,
-      columnDefinitions: JSON.stringify(['Item', 'Description', 'Quantity', 'Unit Price', 'Total']),
+      columnDefinitions: ['Item', 'Description', 'Quantity', 'Unit Price', 'Total'],
       icon: 'receipt',
       color: '#10B981',
     },
@@ -324,7 +325,7 @@ export async function seedTemplates() {
       slug: 'inventory',
       description: 'Product inventory with SKU, stock levels, and location',
       category: 'inventory' as const,
-      columnDefinitions: JSON.stringify(['SKU', 'Product Name', 'Category', 'Quantity', 'Location', 'Last Updated']),
+      columnDefinitions: ['SKU', 'Product Name', 'Category', 'Quantity', 'Location', 'Last Updated'],
       icon: 'package',
       color: '#F59E0B',
     },
@@ -333,7 +334,7 @@ export async function seedTemplates() {
       slug: 'employee-list',
       description: 'Employee directory with contact information',
       category: 'hr' as const,
-      columnDefinitions: JSON.stringify(['ID', 'Name', 'Department', 'Email', 'Phone', 'Start Date']),
+      columnDefinitions: ['ID', 'Name', 'Department', 'Email', 'Phone', 'Start Date'],
       icon: 'users',
       color: '#8B5CF6',
     },
@@ -342,7 +343,7 @@ export async function seedTemplates() {
       slug: 'expense-report',
       description: 'Track expenses with categories and approval status',
       category: 'finance' as const,
-      columnDefinitions: JSON.stringify(['Date', 'Description', 'Category', 'Amount', 'Receipt', 'Status']),
+      columnDefinitions: ['Date', 'Description', 'Category', 'Amount', 'Receipt', 'Status'],
       icon: 'credit-card',
       color: '#EF4444',
     },
@@ -351,7 +352,7 @@ export async function seedTemplates() {
       slug: 'sales-report',
       description: 'Sales data with regions, products, and revenue',
       category: 'finance' as const,
-      columnDefinitions: JSON.stringify(['Date', 'Region', 'Product', 'Units', 'Revenue', 'Growth']),
+      columnDefinitions: ['Date', 'Region', 'Product', 'Units', 'Revenue', 'Growth'],
       icon: 'trending-up',
       color: '#3B82F6',
     },
@@ -360,7 +361,7 @@ export async function seedTemplates() {
       slug: 'general',
       description: 'Flexible format for any tabular data',
       category: 'general' as const,
-      columnDefinitions: JSON.stringify([]),
+      columnDefinitions: [],
       icon: 'table',
       color: '#6B7280',
     },
@@ -368,9 +369,12 @@ export async function seedTemplates() {
 
   for (const template of defaultTemplates) {
     try {
-      await db.insert(templates).values(template).onDuplicateKeyUpdate({ set: template });
+      await db.insert(templates).values(template).onConflictDoUpdate({
+        target: templates.slug,
+        set: template,
+      });
     } catch (error) {
-      // Ignore duplicate key errors
+      // Ignore errors
     }
   }
 }

@@ -3,6 +3,11 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
+
+// TESTING_MODE: Set to false before production launch!
+// When true: unlimited conversions, Pro features unlocked for all users
+// When false: enforces usage limits and Pro subscription checks
+const TESTING_MODE = true;
 import {
   getUserById,
   updateUserSubscription,
@@ -106,10 +111,14 @@ export const appRouter = router({
     checkUsage: publicProcedure
       .input(z.object({ anonymousId: z.string().optional() }).optional())
       .query(async ({ ctx, input }) => {
+        if (TESTING_MODE) {
+          return { allowed: true, remaining: -1 }; // -1 means unlimited
+        }
+
         if (ctx.user) {
           return await checkUserUsageLimit(ctx.user.id);
         }
-        
+
         // For anonymous users, use IP address
         const ip = ctx.req.headers['x-forwarded-for'] as string || ctx.req.socket?.remoteAddress || '127.0.0.1';
         return await checkAnonymousUsageLimit(ip);
@@ -144,20 +153,22 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         const ip = ctx.req.headers['x-forwarded-for'] as string || ctx.req.socket?.remoteAddress || '127.0.0.1';
 
-        // Check usage limits
-        let usageCheck;
-        if (ctx.user) {
-          usageCheck = await checkUserUsageLimit(ctx.user.id);
-        } else {
-          usageCheck = await checkAnonymousUsageLimit(ip);
-        }
+        // Check usage limits (skip in testing mode)
+        if (!TESTING_MODE) {
+          let usageCheck;
+          if (ctx.user) {
+            usageCheck = await checkUserUsageLimit(ctx.user.id);
+          } else {
+            usageCheck = await checkAnonymousUsageLimit(ip);
+          }
 
-        if (!usageCheck.allowed) {
-          return {
-            success: false,
-            error: usageCheck.message,
-            errorCode: 'USAGE_LIMIT_EXCEEDED',
-          };
+          if (!usageCheck.allowed) {
+            return {
+              success: false,
+              error: usageCheck.message,
+              errorCode: 'USAGE_LIMIT_EXCEEDED',
+            };
+          }
         }
 
         // Validate file size (20MB limit)
@@ -180,8 +191,6 @@ export const appRouter = router({
         }
 
         // Check if user has Pro access for Pro templates (allow sample demos)
-        // TEMPORARY: Bypassed for testing - remove this comment and uncomment the check below for production
-        const TESTING_MODE = true; // Set to false for production
         if (template.isPro && !input.isSampleDemo && !TESTING_MODE) {
           if (!ctx.user) {
             return {

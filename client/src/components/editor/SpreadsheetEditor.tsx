@@ -63,6 +63,28 @@ function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
 }
 
 /**
+ * Extract cell value from FortuneSheet cell object
+ */
+function extractCellValue(cell: any): { value: any; bold?: boolean; bg?: string } {
+  if (cell === null || cell === undefined) {
+    return { value: '' };
+  }
+
+  if (typeof cell === 'object' && cell !== null) {
+    // FortuneSheet cell object can have: v (value), m (display text), bl (bold), bg (background)
+    const value = cell.v ?? cell.m ?? '';
+    return {
+      value,
+      bold: cell.bl === 1,
+      bg: cell.bg,
+    };
+  }
+
+  // Primitive value
+  return { value: cell };
+}
+
+/**
  * Export FortuneSheet data to Excel file
  * FortuneSheet can store data in two formats:
  * 1. celldata array (initial format)
@@ -70,67 +92,72 @@ function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
  */
 async function exportToExcel(sheets: SheetData[], filename: string = "converted_data.xlsx") {
   const workbook = new ExcelJS.Workbook();
-  
+
   for (const sheet of sheets) {
     const worksheet = workbook.addWorksheet(sheet.name || 'Sheet');
-    
+
     // FortuneSheet stores data in 'data' array after editing, or 'celldata' initially
     if (sheet.data && Array.isArray(sheet.data)) {
       // Handle 2D array format (after editing)
-      sheet.data.forEach((row: any[], rowIndex: number) => {
-        if (!row) return;
-        row.forEach((cell: any, colIndex: number) => {
-          if (cell === null || cell === undefined) return;
+      // IMPORTANT: Iterate through ALL indices, not just defined ones
+      for (let rowIndex = 0; rowIndex < sheet.data.length; rowIndex++) {
+        const row = sheet.data[rowIndex];
+        if (!row || !Array.isArray(row)) continue;
+
+        for (let colIndex = 0; colIndex < row.length; colIndex++) {
+          const cell = row[colIndex];
+          const { value, bold, bg } = extractCellValue(cell);
+
+          // Only skip truly empty cells (empty string after extraction)
+          if (value === '' || value === null || value === undefined) continue;
+
           const excelCell = worksheet.getCell(rowIndex + 1, colIndex + 1);
-          
-          if (typeof cell === 'object' && cell !== null) {
-            excelCell.value = cell.v ?? cell.m ?? '';
-            if (cell.bl === 1) {
-              excelCell.font = { bold: true };
-            }
-            if (cell.bg) {
-              excelCell.fill = {
-                type: "pattern",
-                pattern: "solid",
-                fgColor: { argb: String(cell.bg).replace("#", "FF") }
-              };
-            }
-          } else {
-            excelCell.value = cell;
+          excelCell.value = value;
+
+          if (bold) {
+            excelCell.font = { bold: true };
           }
-        });
-      });
+          if (bg) {
+            excelCell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: String(bg).replace("#", "FF") }
+            };
+          }
+        }
+      }
     } else if (sheet.celldata && Array.isArray(sheet.celldata)) {
       // Handle celldata format (initial)
       for (const cell of sheet.celldata) {
         if (cell.r === undefined || cell.c === undefined) continue;
+
+        const { value, bold, bg } = extractCellValue(cell.v);
+
+        // Only skip truly empty cells
+        if (value === '' || value === null || value === undefined) continue;
+
         const excelCell = worksheet.getCell(cell.r + 1, cell.c + 1);
-        const cellValue = cell.v;
-        
-        if (typeof cellValue === 'object' && cellValue !== null) {
-          excelCell.value = cellValue.v ?? '';
-          if (cellValue.bl === 1) {
-            excelCell.font = { bold: true };
-          }
-          if (cellValue.bg) {
-            excelCell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: String(cellValue.bg).replace("#", "FF") }
-            };
-          }
-        } else {
-          excelCell.value = cellValue ?? '';
+        excelCell.value = value;
+
+        if (bold) {
+          excelCell.font = { bold: true };
+        }
+        if (bg) {
+          excelCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: String(bg).replace("#", "FF") }
+          };
         }
       }
     }
-    
+
     // Auto-width columns
     worksheet.columns.forEach(col => {
       col.width = 15;
     });
   }
-  
+
   const buffer = await workbook.xlsx.writeBuffer();
   saveAs(new Blob([buffer]), filename);
 }

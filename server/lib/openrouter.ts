@@ -1,6 +1,90 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
 
+/**
+ * Post-process extracted tables to fix common AI alignment issues:
+ * 1. Remove empty strings that shift data
+ * 2. Fill in merged cell values from previous rows
+ * 3. Ensure row length matches header length
+ */
+function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
+  return tables.map(table => {
+    const headerCount = table.headers.length;
+    const processedRows: (string | null)[][] = [];
+
+    // Track the last non-empty value for each column (for merged cells)
+    const lastValues: (string | null)[] = new Array(headerCount).fill(null);
+
+    for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
+      let row = [...table.rows[rowIndex]];
+
+      // Step 1: Remove leading empty strings that shift data right
+      // Detect if row has empty strings at start followed by data
+      let leadingEmpties = 0;
+      for (let i = 0; i < row.length; i++) {
+        if (row[i] === '' || row[i] === null) {
+          leadingEmpties++;
+        } else {
+          break;
+        }
+      }
+
+      // If we have leading empties and the row is longer than headers,
+      // the empties are likely causing misalignment - remove them
+      if (leadingEmpties > 0 && row.length > headerCount) {
+        // Remove the excess empty strings
+        const excess = row.length - headerCount;
+        const emptiesToRemove = Math.min(leadingEmpties, excess);
+        row = row.slice(emptiesToRemove);
+      }
+
+      // Step 2: If row is shorter than headers, something's wrong
+      // Pad with nulls at the end
+      while (row.length < headerCount) {
+        row.push(null);
+      }
+
+      // Step 3: If row is longer than headers, trim from the end
+      if (row.length > headerCount) {
+        row = row.slice(0, headerCount);
+      }
+
+      // Step 4: Fill in empty values at the start with values from previous row
+      // (handles merged cells that span multiple rows)
+      for (let colIndex = 0; colIndex < row.length; colIndex++) {
+        const value = row[colIndex];
+
+        // If this cell is empty/null and we have a previous value, use it
+        // But only for the first few columns (typically merged cells are on the left)
+        if ((value === '' || value === null) && lastValues[colIndex] !== null) {
+          // Only fill if this looks like a merged cell scenario:
+          // - It's in the first 3 columns (Project, Phase, Department, etc.)
+          // - The rest of the row has data
+          const hasDataAfter = row.slice(colIndex + 1).some(v => v !== '' && v !== null);
+          if (colIndex < 3 && hasDataAfter) {
+            row[colIndex] = lastValues[colIndex];
+          }
+        }
+
+        // Update last values for non-empty cells
+        if (value !== '' && value !== null) {
+          lastValues[colIndex] = value;
+        }
+      }
+
+      // Step 5: Convert empty strings to null for consistency
+      row = row.map(v => v === '' ? null : v);
+
+      processedRows.push(row);
+    }
+
+    return {
+      ...table,
+      rows: processedRows,
+    };
+  });
+}
+
 export interface ExtractedTable {
   sheetName: string;
   headers: string[];
@@ -28,25 +112,74 @@ export interface ExtractionResult {
 
 const SYSTEM_PROMPT = `You are a precise data extraction AI. Your job is to extract ALL tables from PDF images and return them as structured JSON.
 
-CRITICAL RULES:
-1. Extract EVERY table you see, even partial ones
-2. PRESERVE EXACT VALUES - copy text EXACTLY as it appears, character for character
-3. DO NOT normalize, modify, or "fix" any values:
-   - Keep dates exactly as shown (e.g., "2018-03-01" stays "2018-03-01", not "2018-03")
-   - Keep currency formats exactly (e.g., "46000:-" stays "46000:-", not "46000+" or "46000")
-   - Keep number formats exactly (e.g., "1,234.56" or "1.234,56" - preserve the original)
-   - Keep special characters exactly as they appear (:-  +  %  etc.)
-4. If a cell is empty, use null
-5. If you're unsure about a value, include your best guess but flag it in warnings
-6. Detect the header row - it's usually the first row with column names
-7. Handle merged cells by repeating the value or leaving subsequent cells null
-8. Keep all currency symbols, suffixes, and formatting with their values
+SHEET NAMING (STRICT - MAX 15 CHARS):
+- Use ONLY short generic names: "Inventory", "Employees", "Projects", "Sales", "Budget", "Timeline", "Expenses", "Tasks", "Orders", "Contacts"
+- NEVER include descriptive words like "Product", "Department", "Performance", "Status", "Metrics"
+- NEVER include "(Page X)" suffix - the system adds page numbers automatically
+- BAD: "Product Inventory Status", "Employee Performance Metrics", "Department Expenses"
+- GOOD: "Inventory", "Employees", "Expenses"
+
+CRITICAL: MERGED/SPANNING CELLS - READ CAREFULLY
+
+When a cell in the PDF visually spans multiple rows (the text appears once but covers 2+ rows):
+- You MUST repeat that value in EVERY row it spans
+- NEVER leave empty strings "" or skip values - this breaks column alignment
+
+EXAMPLE 1 - Project Timeline with merged cells:
+Headers: ["Project", "Phase", "Task", "Owner", "Start", "End"]
+If "Alpha" spans rows 1-3 and "Planning" spans rows 1-2:
+
+Visual PDF:
+| Alpha | Planning | Research | Team A | 01/07 | 05/07 |
+|       |          | Design   | Team B | 06/07 | 12/07 |
+|       | Dev      | Coding   | Team C | 13/07 | 20/07 |
+
+CORRECT output (repeat merged values):
+["Alpha", "Planning", "Research", "Team A", "01/07", "05/07"]
+["Alpha", "Planning", "Design", "Team B", "06/07", "12/07"]
+["Alpha", "Dev", "Coding", "Team C", "13/07", "20/07"]
+
+WRONG output (missing values):
+["Alpha", "Planning", "Research", "Team A", "01/07", "05/07"]
+["", "", "Design", "Team B", "06/07", "12/07"]  ← WRONG: empty strings shift data
+["Alpha", "Design", "Team B", "06/07", "12/07", ""]  ← WRONG: missing Phase column
+
+EXAMPLE 2 - Department Expenses with sub-rows:
+Headers: ["Department", "Category", "Jul", "Aug", "Sep", "Total"]
+If "IT" is a department with sub-items Hardware and Software:
+
+Visual PDF:
+| IT        | Hardware | $12,500 | $15,200 | $11,800 | $39,500 |
+|           | Software | $8,000  | $7,500  | $9,200  | $24,700 |
+| Marketing | Ads      | $5,000  | $6,000  | $5,500  | $16,500 |
+
+CORRECT output:
+["IT", "Hardware", "$12,500", "$15,200", "$11,800", "$39,500"]
+["IT", "Software", "$8,000", "$7,500", "$9,200", "$24,700"]
+["Marketing", "Ads", "$5,000", "$6,000", "$5,500", "$16,500"]
+
+WRONG output:
+["IT", "Hardware", "$12,500", "$15,200", "$11,800", "$39,500"]
+["", "Software", "$8,000", "$7,500", "$9,200", "$24,700"]  ← WRONG: "" in Department
+["IT", "", "Software", "$8,000", ...]  ← WRONG: extra "" shifts everything
+
+KEY RULES:
+1. Count headers FIRST - every row needs EXACTLY that many columns
+2. When a cell spans rows visually, REPEAT the value in each row
+3. NEVER use empty string "" - use null ONLY for truly empty cells
+4. Check alignment: if row[3] should be "Owner" data, verify it's not "Start" data
+
+VALUE PRESERVATION:
+- Copy text EXACTLY: "46000:-" stays "46000:-", "2018-03-01" stays "2018-03-01"
+
+VALIDATION - DO THIS BEFORE OUTPUTTING:
+For each row: count values. If count != header count, you have an error. Fix it.
 
 OUTPUT FORMAT:
 {
   "tables": [
     {
-      "sheetName": "Descriptive name based on content",
+      "sheetName": "Short Name",
       "pageNumber": 1,
       "headers": ["Column1", "Column2", ...],
       "rows": [
@@ -108,13 +241,31 @@ export async function extractTablesFromMultiplePages(
 
     if (result.success) {
       // Update page numbers in tables
-      const tablesWithPageNum = result.tables.map(table => ({
-        ...table,
-        pageNumber: page.pageNumber,
-        sheetName: pages.length > 1 
-          ? `${table.sheetName} (Page ${page.pageNumber})`
-          : table.sheetName,
-      }));
+      const tablesWithPageNum = result.tables.map(table => {
+        let sheetName = table.sheetName;
+
+        // Add page number suffix for multi-page documents
+        if (pages.length > 1) {
+          const suffix = ` (P${page.pageNumber})`;
+          // Excel sheet names max 31 chars - truncate base name if needed
+          const maxBaseLength = 31 - suffix.length;
+          if (sheetName.length > maxBaseLength) {
+            sheetName = sheetName.substring(0, maxBaseLength);
+          }
+          sheetName = sheetName + suffix;
+        }
+
+        // Final safety truncation to 31 chars
+        if (sheetName.length > 31) {
+          sheetName = sheetName.substring(0, 31);
+        }
+
+        return {
+          ...table,
+          pageNumber: page.pageNumber,
+          sheetName,
+        };
+      });
       
       allTables.push(...tablesWithPageNum);
       
@@ -297,9 +448,12 @@ export async function extractTablesFromPDF(
       };
     }
 
+    // Post-process tables to fix alignment issues
+    const processedTables = postProcessTables(parsed.tables || []);
+
     return {
       success: true,
-      tables: parsed.tables || [],
+      tables: processedTables,
       warnings: parsed.warnings || [],
       confidence: parsed.overallConfidence || 0.9,
       processingTime: Date.now() - startTime,

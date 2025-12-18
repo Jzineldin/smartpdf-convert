@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { trpc } from '@/lib/trpc';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
@@ -13,6 +13,18 @@ import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw,
 import TemplateSelector from '@/components/templates/TemplateSelector';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
+
+const CACHE_KEY = 'smartpdf_last_conversion';
+const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+interface CachedConversion {
+  tables: ExtractedTable[];
+  warnings: AIWarning[];
+  confidence: number;
+  fileName: string;
+  pageCount?: number;
+  timestamp: number;
+}
 
 interface ExtractedTable {
   sheetName: string;
@@ -47,6 +59,50 @@ export default function Convert() {
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
+
+  // Load cached conversion on mount
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const data: CachedConversion = JSON.parse(cached);
+        // Check if cache is still valid (not expired)
+        if (Date.now() - data.timestamp < CACHE_EXPIRY_MS) {
+          setExtractedTables(data.tables);
+          setWarnings(data.warnings);
+          setConfidence(data.confidence);
+          setFileName(data.fileName);
+          setPageCount(data.pageCount);
+          setProcessingStep('ready');
+          toast.info('Restored your previous conversion. Click "Convert Another" to start fresh.');
+        } else {
+          // Cache expired, remove it
+          localStorage.removeItem(CACHE_KEY);
+        }
+      }
+    } catch (e) {
+      // Invalid cache, remove it
+      localStorage.removeItem(CACHE_KEY);
+    }
+  }, []);
+
+  // Save to cache whenever extraction completes
+  const saveToCache = useCallback((tables: ExtractedTable[], warns: AIWarning[], conf: number, name: string, pages?: number) => {
+    try {
+      const cacheData: CachedConversion = {
+        tables,
+        warnings: warns,
+        confidence: conf,
+        fileName: name,
+        pageCount: pages,
+        timestamp: Date.now(),
+      };
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
+    } catch (e) {
+      // localStorage might be full or disabled, ignore
+      console.warn('Failed to cache conversion:', e);
+    }
+  }, []);
 
   const handleFileSelect = useCallback(async (file: File, base64: string) => {
     setError(null);
@@ -95,13 +151,16 @@ export default function Convert() {
       setConversionId(result.conversionId || null);
       setPageCount(result.pageCount || undefined);
 
+      // Cache the results
+      saveToCache(result.tables || [], result.warnings || [], result.confidence || 0, file.name, result.pageCount);
+
       const pageInfo = result.pageCount && result.pageCount > 1 ? ` from ${result.pageCount} pages` : '';
       toast.success(`Successfully extracted ${result.tables?.length || 0} table(s)${pageInfo}!`);
     } catch (err: any) {
       setProcessingStep('error');
       setError(err.message || 'An unexpected error occurred');
     }
-  }, [usageData, processMutation]);
+  }, [usageData, processMutation, saveToCache]);
 
   const handleTrySample = useCallback(async (templateId: string, sampleUrl: string) => {
     setError(null);
@@ -165,6 +224,9 @@ export default function Convert() {
       setConversionId(result.conversionId || null);
       setPageCount(result.pageCount || undefined);
 
+      // Cache the results
+      saveToCache(result.tables || [], result.warnings || [], result.confidence || 0, sampleFileName, result.pageCount);
+
       toast.success(`Sample processed! See what ${templateId.replace('-', ' ')} template can do.`);
     } catch (err: any) {
       setProcessingStep('error');
@@ -172,7 +234,7 @@ export default function Convert() {
     } finally {
       setIsTryingSample(false);
     }
-  }, [processMutation]);
+  }, [processMutation, saveToCache]);
 
   const handleReset = () => {
     setProcessingStep(null);
@@ -184,6 +246,8 @@ export default function Convert() {
     setViewMode('preview');
     setPageCount(undefined);
     setFileName('converted-tables');
+    // Clear the cache when user wants to start fresh
+    localStorage.removeItem(CACHE_KEY);
   };
 
   return (
