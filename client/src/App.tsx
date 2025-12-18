@@ -13,6 +13,7 @@ import Convert from "./pages/Convert";
 import Dashboard from "./pages/Dashboard";
 import Pricing from "./pages/Pricing";
 import Success from "./pages/Success";
+import History from "./pages/History";
 import NotFound from "./pages/NotFound";
 
 function Router() {
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/success" component={Success} />
+      <Route path="/history" component={History} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

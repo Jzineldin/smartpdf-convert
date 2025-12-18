@@ -368,6 +368,20 @@ export const appRouter = router({
           return { success: false, error: 'Failed to export Excel file' };
         }
       }),
+
+    // Delete a conversion
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const conversion = await getConversionById(input.id);
+        if (!conversion || conversion.userId !== ctx.user.id) {
+          throw new Error('Conversion not found or access denied');
+        }
+        // For now, just mark as deleted by updating status
+        // In production, you'd also delete the S3 files
+        await updateConversion(input.id, { status: 'failed', errorMessage: 'Deleted by user' });
+        return { success: true };
+      }),
   }),
 
   // Templates
