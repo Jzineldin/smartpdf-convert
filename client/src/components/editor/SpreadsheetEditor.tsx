@@ -1,195 +1,256 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
-import { HotTable, HotTableClass } from '@handsontable/react';
-import { registerAllModules } from 'handsontable/registry';
-import 'handsontable/dist/handsontable.full.min.css';
+import { useState, useEffect, useCallback } from 'react';
+import { Workbook } from "@fortune-sheet/react";
+
+// FortuneSheet data type
+type SheetData = any;
+import "@fortune-sheet/react/dist/index.css";
+import * as ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Download, Plus, Trash2, Save } from 'lucide-react';
+import { Download, Copy, Check } from 'lucide-react';
+import { toast } from 'sonner';
 
-// Register all Handsontable modules
-registerAllModules();
-
-export interface SheetData {
-  name: string;
+export interface ExtractedTable {
+  sheetName: string;
   headers: string[];
-  rows: (string | number | null)[][];
+  rows: (string | null)[][];
+  pageNumber: number;
+  confidence: number;
 }
 
 interface SpreadsheetEditorProps {
-  initialData: SheetData[];
-  onExport: (sheets: { name: string; data: (string | number | null)[][] }[]) => void;
-  onSave?: (sheets: SheetData[]) => void;
-  isExporting?: boolean;
+  tables: ExtractedTable[];
+  filename: string;
+  onExport?: () => void;
 }
 
-export default function SpreadsheetEditor({
-  initialData,
-  onExport,
-  onSave,
-  isExporting = false,
-}: SpreadsheetEditorProps) {
-  const [sheets, setSheets] = useState<SheetData[]>(initialData);
-  const [activeSheet, setActiveSheet] = useState(0);
-  const hotRef = useRef<HotTableClass>(null);
-
-  // Update sheets when initialData changes
-  useEffect(() => {
-    setSheets(initialData);
-    setActiveSheet(0);
-  }, [initialData]);
-
-  const getCurrentSheetData = useCallback(() => {
-    const hot = hotRef.current?.hotInstance;
-    if (!hot) return null;
-
-    const data = hot.getData() as (string | number | null)[][];
-    return data;
-  }, []);
-
-  const handleSheetChange = (index: number) => {
-    // Save current sheet data before switching
-    const currentData = getCurrentSheetData();
-    if (currentData) {
-      setSheets(prev => {
-        const updated = [...prev];
-        updated[activeSheet] = {
-          ...updated[activeSheet],
-          rows: currentData.slice(1), // Exclude header row
-          headers: currentData[0] as string[],
-        };
-        return updated;
-      });
-    }
-    setActiveSheet(index);
-  };
-
-  const handleExport = () => {
-    // Get latest data from current sheet
-    const currentData = getCurrentSheetData();
-    const updatedSheets = [...sheets];
+/**
+ * Convert extracted AI tables to FortuneSheet format
+ */
+function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
+  return tables.map((table, index) => {
+    const celldata: any[] = [];
     
-    if (currentData) {
-      updatedSheets[activeSheet] = {
-        ...updatedSheets[activeSheet],
-        rows: currentData.slice(1),
-        headers: currentData[0] as string[],
-      };
+    // Headers (bold with background)
+    table.headers.forEach((header, colIndex) => {
+      celldata.push({
+        r: 0,
+        c: colIndex,
+        v: { v: header || '', bl: 1, bg: "#f3f4f6" }
+      });
+    });
+    
+    // Data rows
+    table.rows.forEach((row, rowIndex) => {
+      row.forEach((cell, colIndex) => {
+        celldata.push({
+          r: rowIndex + 1,
+          c: colIndex,
+          v: { v: cell ?? '' }
+        });
+      });
+    });
+    
+    return {
+      name: table.sheetName || `Sheet${index + 1}`,
+      celldata,
+      config: {
+        rowlen: { 0: 30 },
+        columnlen: {},
+      },
+    } as SheetData;
+  });
+}
+
+/**
+ * Export FortuneSheet data to Excel file
+ */
+async function exportToExcel(data: SheetData[], filename: string = "converted_data.xlsx") {
+  const workbook = new ExcelJS.Workbook();
+  
+  for (const sheet of data) {
+    const worksheet = workbook.addWorksheet(sheet.name || 'Sheet');
+    
+    // Find max rows and cols
+    let maxRow = 0, maxCol = 0;
+    const celldata = sheet.celldata || [];
+    for (const cell of celldata) {
+      if (cell.r !== undefined && cell.r > maxRow) maxRow = cell.r;
+      if (cell.c !== undefined && cell.c > maxCol) maxCol = cell.c;
     }
-
-    // Format for export
-    const exportData = updatedSheets.map(sheet => ({
-      name: sheet.name,
-      data: [sheet.headers, ...sheet.rows],
-    }));
-
-    onExport(exportData);
-  };
-
-  const handleAddRow = () => {
-    const hot = hotRef.current?.hotInstance;
-    if (hot) {
-      hot.alter('insert_row_below', hot.countRows() - 1);
-    }
-  };
-
-  const handleAddColumn = () => {
-    const hot = hotRef.current?.hotInstance;
-    if (hot) {
-      hot.alter('insert_col_end');
-    }
-  };
-
-  const handleDeleteRow = () => {
-    const hot = hotRef.current?.hotInstance;
-    if (hot) {
-      const selected = hot.getSelected();
-      if (selected && selected.length > 0) {
-        const [startRow] = selected[0];
-        if (startRow > 0) { // Don't delete header row
-          hot.alter('remove_row', startRow);
+    
+    // Write cells
+    for (const cell of celldata) {
+      if (cell.r === undefined || cell.c === undefined) continue;
+      const excelCell = worksheet.getCell(cell.r + 1, cell.c + 1);
+      const cellValue = cell.v;
+      
+      if (typeof cellValue === 'object' && cellValue !== null) {
+        excelCell.value = cellValue.v ?? '';
+        // Apply styles
+        if (cellValue.bl === 1) {
+          excelCell.font = { bold: true };
         }
+        if (cellValue.bg) {
+          excelCell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: String(cellValue.bg).replace("#", "FF") }
+          };
+        }
+      } else {
+        excelCell.value = cellValue ?? '';
       }
     }
-  };
+    
+    // Auto-width columns
+    worksheet.columns.forEach(col => {
+      col.width = 15;
+    });
+  }
+  
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(new Blob([buffer]), filename);
+}
 
-  const currentSheet = sheets[activeSheet];
-  const tableData = currentSheet
-    ? [currentSheet.headers, ...currentSheet.rows]
-    : [['']];
+/**
+ * Copy all data to clipboard as tab-separated values
+ */
+function copyToClipboard(data: SheetData[]) {
+  const allText: string[] = [];
+  
+  for (const sheet of data) {
+    const celldata = sheet.celldata || [];
+    
+    // Find max rows and cols
+    let maxRow = 0, maxCol = 0;
+    for (const cell of celldata) {
+      if (cell.r !== undefined && cell.r > maxRow) maxRow = cell.r;
+      if (cell.c !== undefined && cell.c > maxCol) maxCol = cell.c;
+    }
+    
+    // Create a 2D array
+    const grid: string[][] = [];
+    for (let r = 0; r <= maxRow; r++) {
+      grid[r] = [];
+      for (let c = 0; c <= maxCol; c++) {
+        grid[r][c] = '';
+      }
+    }
+    
+    // Fill in values
+    for (const cell of celldata) {
+      if (cell.r === undefined || cell.c === undefined) continue;
+      const cellValue = cell.v;
+      if (typeof cellValue === 'object' && cellValue !== null) {
+        grid[cell.r][cell.c] = String(cellValue.v ?? '');
+      } else {
+        grid[cell.r][cell.c] = String(cellValue ?? '');
+      }
+    }
+    
+    // Convert to tab-separated string
+    const sheetText = grid.map(row => row.join('\t')).join('\n');
+    allText.push(`=== ${sheet.name || 'Sheet'} ===\n${sheetText}`);
+  }
+  
+  return allText.join('\n\n');
+}
+
+export default function SpreadsheetEditor({ tables, filename, onExport }: SpreadsheetEditorProps) {
+  const [data, setData] = useState<SheetData[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (tables && tables.length > 0) {
+      const fortuneData = convertToFortuneSheet(tables);
+      setData(fortuneData);
+    }
+  }, [tables]);
+
+  const handleExport = useCallback(async () => {
+    try {
+      const exportFilename = filename.replace(/\.(pdf|png|jpg|jpeg)$/i, '.xlsx');
+      await exportToExcel(data, exportFilename);
+      toast.success('Excel file downloaded successfully!');
+      if (onExport) {
+        onExport();
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Failed to export Excel file');
+    }
+  }, [data, filename, onExport]);
+
+  const handleCopy = useCallback(async () => {
+    try {
+      const text = copyToClipboard(data);
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast.success('Data copied to clipboard!');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error('Copy error:', error);
+      toast.error('Failed to copy to clipboard');
+    }
+  }, [data]);
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64 text-muted-foreground">
+        No data to display
+      </div>
+    );
+  }
 
   return (
-    <Card className="w-full">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">Edit Extracted Data</CardTitle>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleAddRow}>
-              <Plus className="h-4 w-4 mr-1" />
-              Row
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleAddColumn}>
-              <Plus className="h-4 w-4 mr-1" />
-              Column
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleDeleteRow}>
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete Row
-            </Button>
-            <Button onClick={handleExport} disabled={isExporting}>
-              <Download className="h-4 w-4 mr-2" />
-              {isExporting ? 'Exporting...' : 'Export Excel'}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {sheets.length > 1 && (
-          <Tabs
-            value={activeSheet.toString()}
-            onValueChange={(v) => handleSheetChange(parseInt(v))}
-            className="mb-4"
+    <div className="flex flex-col h-full border rounded-lg overflow-hidden bg-white dark:bg-gray-900">
+      {/* Toolbar */}
+      <div className="flex items-center justify-between px-4 py-2 border-b bg-gray-50 dark:bg-gray-800">
+        <span className="font-medium text-sm truncate max-w-[200px]" title={filename}>
+          {filename}
+        </span>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopy}
+            className="gap-2"
           >
-            <TabsList>
-              {sheets.map((sheet, index) => (
-                <TabsTrigger key={index} value={index.toString()}>
-                  {sheet.name}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        )}
-
-        <div className="border rounded-lg overflow-hidden">
-          <HotTable
-            ref={hotRef}
-            data={tableData}
-            rowHeaders={true}
-            colHeaders={true}
-            height={400}
-            width="100%"
-            licenseKey="non-commercial-and-evaluation"
-            stretchH="all"
-            contextMenu={true}
-            manualColumnResize={true}
-            manualRowResize={true}
-            autoWrapRow={true}
-            autoWrapCol={true}
-            fixedRowsTop={1}
-            cells={(row) => {
-              const cellProperties: any = {};
-              if (row === 0) {
-                cellProperties.className = 'htCenter htMiddle font-bold bg-muted';
-              }
-              return cellProperties;
-            }}
-          />
+            {copied ? (
+              <>
+                <Check className="h-4 w-4 text-green-500" />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="h-4 w-4" />
+                Copy All
+              </>
+            )}
+          </Button>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleExport}
+            className="gap-2"
+          >
+            <Download className="h-4 w-4" />
+            Export XLSX
+          </Button>
         </div>
-
-        <p className="text-xs text-muted-foreground mt-3">
-          Tip: Double-click a cell to edit. Right-click for more options. The first row is treated as headers.
-        </p>
-      </CardContent>
-    </Card>
+      </div>
+      
+      {/* FortuneSheet Editor */}
+      <div className="flex-1 min-h-[400px]">
+        <Workbook
+          data={data}
+          onChange={setData}
+          showToolbar={true}
+          showFormulaBar={true}
+          showSheetTabs={true}
+        />
+      </div>
+    </div>
   );
 }

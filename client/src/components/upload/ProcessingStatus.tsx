@@ -81,7 +81,7 @@ export default function ProcessingStatus({
               <span className="font-medium">Page Progress</span>
             </span>
             <span className="text-blue-600 font-medium">
-              {currentPage} of {pageCount}
+              {currentPage} of {pageCount} ({Math.round((currentPage / pageCount) * 100)}%)
             </span>
           </div>
           <Progress value={(currentPage / pageCount) * 100} className="h-2" />

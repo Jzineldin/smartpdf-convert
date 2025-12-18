@@ -4,12 +4,12 @@ import { trpc } from '@/lib/trpc';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import DropZone from '@/components/upload/DropZone';
 import ProcessingStatus, { ProcessingStep } from '@/components/upload/ProcessingStatus';
-import SpreadsheetEditor, { SheetData } from '@/components/editor/SpreadsheetEditor';
+import SpreadsheetEditor from '@/components/editor/SpreadsheetEditor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, Download, RotateCcw, Edit3, Eye } from 'lucide-react';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ExtractedTable {
@@ -38,16 +38,17 @@ export default function Convert() {
   const [conversionId, setConversionId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
   const [pageCount, setPageCount] = useState<number | undefined>(undefined);
+  const [fileName, setFileName] = useState<string>('converted-tables');
 
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
-  const exportMutation = trpc.conversion.export.useMutation();
 
   const handleFileSelect = useCallback(async (file: File, base64: string) => {
     setError(null);
     setExtractedTables(null);
     setWarnings([]);
     setViewMode('preview');
+    setFileName(file.name);
     
     // Check usage limit
     if (usageData && !usageData.allowed) {
@@ -96,33 +97,6 @@ export default function Convert() {
     }
   }, [usageData, processMutation]);
 
-  const handleExport = async (sheets?: { name: string; data: (string | number | null)[][] }[]) => {
-    if (!extractedTables || extractedTables.length === 0) return;
-
-    try {
-      const exportSheets = sheets || extractedTables.map(table => ({
-        name: table.sheetName,
-        data: [table.headers, ...table.rows] as (string | number | null)[][],
-      }));
-
-      const result = await exportMutation.mutateAsync({
-        conversionId: conversionId || undefined,
-        sheets: exportSheets,
-        fileName: 'converted-tables',
-      });
-
-      if (result.success && result.url) {
-        // Open download URL
-        window.open(result.url, '_blank');
-        toast.success('Excel file ready for download!');
-      } else {
-        toast.error('Failed to export Excel file');
-      }
-    } catch (err) {
-      toast.error('Export failed. Please try again.');
-    }
-  };
-
   const handleReset = () => {
     setProcessingStep(null);
     setError(null);
@@ -132,14 +106,8 @@ export default function Convert() {
     setConversionId(null);
     setViewMode('preview');
     setPageCount(undefined);
+    setFileName('converted-tables');
   };
-
-  // Convert extracted tables to SheetData format for editor
-  const sheetsForEditor: SheetData[] = extractedTables?.map(table => ({
-    name: table.sheetName,
-    headers: table.headers,
-    rows: table.rows,
-  })) || [];
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -158,12 +126,12 @@ export default function Convert() {
               </Badge>
             )}
             {isAuthenticated ? (
-              <Button variant="outline" size="sm" onClick={() => setLocation('/dashboard')}>
+              <Button variant="outline" onClick={() => setLocation('/dashboard')}>
                 Dashboard
               </Button>
             ) : (
-              <Button variant="outline" size="sm" onClick={() => setLocation('/login')}>
-                Sign in
+              <Button variant="outline" onClick={() => setLocation('/login')}>
+                Sign In
               </Button>
             )}
           </div>
@@ -171,215 +139,206 @@ export default function Convert() {
       </header>
 
       <main className="container py-8">
-        <div className="max-w-5xl mx-auto">
-          {/* Back button */}
-          <Button variant="ghost" size="sm" className="mb-6" onClick={() => setLocation('/')}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
+        <div className="mb-6">
+          <Link href="/" className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-4 w-4 mr-1" />
             Back to Home
-          </Button>
+          </Link>
+        </div>
 
-          {/* Main content */}
-          {!processingStep && !extractedTables && (
-            <Card>
-              <CardHeader className="text-center">
-                <CardTitle className="text-2xl">Upload Your PDF</CardTitle>
-                <p className="text-muted-foreground">
-                  Drop your PDF file below and our AI will extract all tables
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <DropZone onFileSelect={handleFileSelect} />
-                
-                <div className="flex items-center justify-center gap-6 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    3 free conversions/day
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    No signup required
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+        {/* Upload Area */}
+        {!processingStep && !extractedTables && (
+          <div className="max-w-2xl mx-auto">
+            <DropZone onFileSelect={handleFileSelect} />
+          </div>
+        )}
 
-          {processingStep && processingStep !== 'ready' && (
-            <Card>
-              <CardContent className="py-12">
-                <ProcessingStatus 
-                  currentStep={processingStep} 
-                  error={error || undefined}
-                  pageCount={pageCount}
-                />
-                {processingStep === 'error' && (
-                  <div className="mt-6 text-center">
-                    <Button onClick={handleReset}>
-                      <RotateCcw className="h-4 w-4 mr-2" />
-                      Try Again
-                    </Button>
-                  </div>
+        {/* Processing Status */}
+        {processingStep && processingStep !== 'ready' && (
+          <div className="max-w-md mx-auto">
+            <ProcessingStatus 
+              currentStep={processingStep} 
+              error={error || undefined}
+              pageCount={pageCount}
+            />
+            {error && (
+              <div className="mt-4 text-center">
+                <Button onClick={handleReset} variant="outline">
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Try Again
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Results */}
+        {extractedTables && extractedTables.length > 0 && (
+          <div className="space-y-6">
+            {/* Results Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <h2 className="text-2xl font-bold">Extraction Results</h2>
+                <Badge 
+                  variant={confidence >= 0.9 ? 'default' : confidence >= 0.7 ? 'secondary' : 'destructive'}
+                  className="font-normal"
+                >
+                  {Math.round(confidence * 100)}% confidence
+                </Badge>
+                {pageCount && pageCount > 1 && (
+                  <Badge variant="outline" className="font-normal">
+                    {pageCount} pages processed
+                  </Badge>
                 )}
-              </CardContent>
-            </Card>
-          )}
+              </div>
+              <Button onClick={handleReset} variant="outline">
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Convert Another
+              </Button>
+            </div>
 
-          {extractedTables && (
-            <div className="space-y-6">
-              {/* Success header */}
-              <Card className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
-                <CardContent className="py-4">
+            {/* Warnings */}
+            {warnings.length > 0 && (
+              <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                    <AlertTriangle className="h-5 w-5" />
+                    Quality Warnings
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="space-y-2">
+                    {warnings.map((warning, index) => (
+                      <li key={index} className="text-sm">
+                        <span className="font-medium">{warning.message}</span>
+                        {warning.suggestion && (
+                          <span className="text-muted-foreground"> — {warning.suggestion}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* View Mode Tabs */}
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'preview' | 'edit')}>
+              <TabsList>
+                <TabsTrigger value="preview" className="gap-2">
+                  <Eye className="h-4 w-4" />
+                  Preview
+                </TabsTrigger>
+                <TabsTrigger value="edit" className="gap-2">
+                  <Edit3 className="h-4 w-4" />
+                  Edit & Export
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="preview" className="mt-4">
+                <div className="space-y-4">
+                  {extractedTables.map((table, index) => (
+                    <Card key={index}>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-lg">{table.sheetName}</CardTitle>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">Page {table.pageNumber}</Badge>
+                            <Badge 
+                              variant={table.confidence >= 0.9 ? 'default' : 'secondary'}
+                              className="font-normal"
+                            >
+                              {Math.round(table.confidence * 100)}%
+                            </Badge>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm border-collapse">
+                            <thead>
+                              <tr className="bg-muted">
+                                {table.headers.map((header, i) => (
+                                  <th key={i} className="border px-3 py-2 text-left font-medium">
+                                    {header}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {table.rows.slice(0, 10).map((row, rowIndex) => (
+                                <tr key={rowIndex} className="hover:bg-muted/50">
+                                  {row.map((cell, cellIndex) => (
+                                    <td key={cellIndex} className="border px-3 py-2">
+                                      {cell ?? ''}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                              {table.rows.length > 10 && (
+                                <tr>
+                                  <td colSpan={table.headers.length} className="border px-3 py-2 text-center text-muted-foreground">
+                                    ... and {table.rows.length - 10} more rows (switch to Edit mode to see all)
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="edit" className="mt-4">
+                <div className="h-[600px]">
+                  <SpreadsheetEditor
+                    tables={extractedTables}
+                    filename={fileName}
+                  />
+                </div>
+              </TabsContent>
+            </Tabs>
+
+            {/* Upgrade CTA for free users */}
+            {usageData && usageData.remaining !== -1 && usageData.remaining <= 1 && (
+              <Card className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+                <CardContent className="py-6">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-full flex items-center justify-center">
-                        <CheckCircle className="h-5 w-5 text-green-600" />
-                      </div>
+                      <Zap className="h-8 w-8" />
                       <div>
-                        <h3 className="font-semibold text-green-900 dark:text-green-100">
-                          Extraction Complete
-                        </h3>
-                        <p className="text-sm text-green-700 dark:text-green-300">
-                          Found {extractedTables.length} table(s) • {Math.round(confidence * 100)}% confidence
+                        <h3 className="font-semibold">Running low on conversions?</h3>
+                        <p className="text-sm text-blue-100">
+                          Upgrade to Pro for unlimited conversions
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={handleReset}>
-                        <RotateCcw className="h-4 w-4 mr-2" />
-                        New File
-                      </Button>
-                      {viewMode === 'preview' && (
-                        <Button size="sm" onClick={() => handleExport()} disabled={exportMutation.isPending}>
-                          <Download className="h-4 w-4 mr-2" />
-                          Download Excel
-                        </Button>
-                      )}
-                    </div>
+                    <Button variant="secondary" onClick={() => setLocation('/pricing')}>
+                      Upgrade to Pro — $9/mo
+                    </Button>
                   </div>
                 </CardContent>
               </Card>
+            )}
+          </div>
+        )}
 
-              {/* Warnings */}
-              {warnings.length > 0 && (
-                <Card className="bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base flex items-center gap-2 text-yellow-900 dark:text-yellow-100">
-                      <AlertTriangle className="h-4 w-4" />
-                      Heads Up
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2">
-                      {warnings.map((warning, index) => (
-                        <li key={index} className="text-sm text-yellow-800 dark:text-yellow-200">
-                          <strong>{warning.message}</strong>
-                          {warning.suggestion && (
-                            <span className="text-yellow-600 dark:text-yellow-400"> — {warning.suggestion}</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* View mode tabs */}
-              <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'preview' | 'edit')}>
-                <TabsList className="grid w-full max-w-xs grid-cols-2">
-                  <TabsTrigger value="preview" className="flex items-center gap-2">
-                    <Eye className="h-4 w-4" />
-                    Preview
-                  </TabsTrigger>
-                  <TabsTrigger value="edit" className="flex items-center gap-2">
-                    <Edit3 className="h-4 w-4" />
-                    Edit
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="preview" className="mt-4">
-                  {/* Tables preview */}
-                  <div className="space-y-4">
-                    {extractedTables.map((table, tableIndex) => (
-                      <Card key={tableIndex}>
-                        <CardHeader className="pb-2">
-                          <div className="flex items-center justify-between">
-                            <CardTitle className="text-base">{table.sheetName}</CardTitle>
-                            <Badge variant="secondary">
-                              {table.rows.length} rows • Page {table.pageNumber}
-                            </Badge>
-                          </div>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="border-b bg-muted/50">
-                                  {table.headers.map((header, i) => (
-                                    <th key={i} className="px-3 py-2 text-left font-medium">
-                                      {header}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {table.rows.slice(0, 5).map((row, rowIndex) => (
-                                  <tr key={rowIndex} className="border-b">
-                                    {row.map((cell, cellIndex) => (
-                                      <td key={cellIndex} className="px-3 py-2">
-                                        {cell ?? '—'}
-                                      </td>
-                                    ))}
-                                  </tr>
-                                ))}
-                                {table.rows.length > 5 && (
-                                  <tr>
-                                    <td colSpan={table.headers.length} className="px-3 py-2 text-center text-muted-foreground">
-                                      ... and {table.rows.length - 5} more rows
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                </TabsContent>
-
-                <TabsContent value="edit" className="mt-4">
-                  <SpreadsheetEditor
-                    initialData={sheetsForEditor}
-                    onExport={handleExport}
-                    isExporting={exportMutation.isPending}
-                  />
-                </TabsContent>
-              </Tabs>
-
-              {/* Upgrade CTA for free users */}
-              {usageData && usageData.remaining !== -1 && usageData.remaining <= 1 && (
-                <Card className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
-                  <CardContent className="py-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Zap className="h-8 w-8" />
-                        <div>
-                          <h3 className="font-semibold">Running low on conversions?</h3>
-                          <p className="text-sm text-blue-100">
-                            Upgrade to Pro for unlimited conversions
-                          </p>
-                        </div>
-                      </div>
-                      <Button variant="secondary" onClick={() => setLocation('/pricing')}>
-                        Upgrade to Pro — $9/mo
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
-        </div>
+        {/* No tables extracted */}
+        {extractedTables && extractedTables.length === 0 && (
+          <Card className="max-w-md mx-auto text-center">
+            <CardContent className="py-8">
+              <AlertTriangle className="h-12 w-12 mx-auto text-yellow-500 mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No Tables Found</h3>
+              <p className="text-muted-foreground mb-4">
+                We couldn't detect any tables in your document. Try uploading a clearer image or a different file.
+              </p>
+              <Button onClick={handleReset}>
+                Try Another File
+              </Button>
+            </CardContent>
+          </Card>
+        )}
       </main>
     </div>
   );
