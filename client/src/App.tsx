@@ -14,6 +14,7 @@ import Dashboard from "./pages/Dashboard";
 import Pricing from "./pages/Pricing";
 import Success from "./pages/Success";
 import History from "./pages/History";
+import AuthCallback from "./pages/AuthCallback";
 import NotFound from "./pages/NotFound";
 
 function Router() {
@@ -27,6 +28,7 @@ function Router() {
       <Route path="/pricing" component={Pricing} />
       <Route path="/success" component={Success} />
       <Route path="/history" component={History} />
+      <Route path="/auth/callback" component={AuthCallback} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

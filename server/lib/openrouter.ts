@@ -209,6 +209,61 @@ WARNING TYPES:
 - mixed_languages: Multiple languages detected
 - inconsistent_format: Dates, numbers, or currencies in inconsistent formats`;
 
+const FALLBACK_PROMPT = `You are a precise data extraction AI. The document contains NO traditional tables, but may have structured data that should be extracted.
+
+TASK: Analyze this document, determine what type it is, and extract ALL relevant structured information as a two-column table (Field | Value).
+
+YOU DECIDE:
+- What type of document this is
+- What fields are relevant to extract
+- How to label the fields appropriately
+- How to structure the data logically
+
+EXTRACTION GUIDELINES:
+1. First, identify the document type (ID, contract, letter, certificate, form, receipt, invoice, report, etc.)
+2. Extract ALL meaningful data points you can find
+3. Use clear, descriptive field names in English
+4. Preserve original values exactly (dates, numbers, names, codes, special characters)
+5. For multi-line content (addresses, paragraphs), combine sensibly or split into logical parts
+6. Group related fields together (e.g., all dates together, all personal info together)
+7. Include metadata if visible (document date, reference numbers, page numbers)
+8. For machine-readable codes (MRZ, barcodes, QR content), parse into human-readable fields
+
+EXAMPLES OF WHAT TO EXTRACT:
+- IDs/Passports: name, number, dates, nationality, issuing authority
+- Contracts: parties, dates, terms, signatures, reference numbers
+- Letters: sender, recipient, date, subject, key points
+- Certificates: recipient, issuer, date, title, validity
+- Forms: all filled fields and their values
+- Receipts: vendor, date, items, totals, payment method
+- Any document: dates, names, numbers, codes, addresses, key text
+
+OUTPUT FORMAT:
+{
+  "tables": [
+    {
+      "sheetName": "Extracted Data",
+      "pageNumber": 1,
+      "headers": ["Field", "Value"],
+      "rows": [
+        ["Document Type", "<what you identified>"],
+        ["<relevant field 1>", "<value>"],
+        ["<relevant field 2>", "<value>"]
+      ],
+      "confidence": 0.90
+    }
+  ],
+  "warnings": [],
+  "overallConfidence": 0.90
+}
+
+IMPORTANT:
+- Be thorough - extract everything that could be useful
+- Be smart about field naming - use what makes sense for THIS document
+- If multiple pages have different content, note which page data came from
+- If you're unsure about a value, extract it anyway with your best interpretation
+- The first row should always identify the Document Type you detected`;
+
 /**
  * Extract tables from multiple pages and combine results
  */
@@ -450,6 +505,65 @@ export async function extractTablesFromPDF(
 
     // Post-process tables to fix alignment issues
     const processedTables = postProcessTables(parsed.tables || []);
+
+    // If no tables found, try fallback extraction for structured data
+    if (processedTables.length === 0) {
+      console.log('No tables found, attempting intelligent key-value extraction...');
+
+      const fallbackResponse = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://smartpdf-convert.com',
+          'X-Title': 'SmartPDF Convert',
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-4o',
+          messages: [
+            { role: 'system', content: FALLBACK_PROMPT },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: `Analyze this document and extract all structured data: "${fileName}". Return valid JSON only.` },
+                { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+              ],
+            },
+          ],
+          max_tokens: 4096,
+          temperature: 0.1,
+        }),
+      });
+
+      if (fallbackResponse.ok) {
+        const fallbackResult = await fallbackResponse.json();
+        const fallbackContent = fallbackResult.choices?.[0]?.message?.content;
+
+        if (fallbackContent) {
+          try {
+            const fallbackParsed = JSON.parse(fallbackContent.replace(/```json\n?|\n?```/g, '').trim());
+
+            if (fallbackParsed.tables && fallbackParsed.tables.length > 0) {
+              const fallbackWarning: AIWarning = {
+                type: 'inconsistent_format',
+                message: 'No tables detected - extracted as structured key-value data',
+                suggestion: 'The AI analyzed this document and extracted all relevant data as Field/Value pairs.',
+              };
+
+              return {
+                success: true,
+                tables: fallbackParsed.tables,
+                warnings: [...(fallbackParsed.warnings || []), fallbackWarning],
+                confidence: fallbackParsed.overallConfidence || 0.85,
+                processingTime: Date.now() - startTime,
+              };
+            }
+          } catch (e) {
+            console.error('Fallback parsing failed:', e);
+          }
+        }
+      }
+    }
 
     return {
       success: true,

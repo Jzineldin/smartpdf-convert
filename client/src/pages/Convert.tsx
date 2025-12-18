@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files } from 'lucide-react';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files, Info } from 'lucide-react';
 import TemplateSelector from '@/components/templates/TemplateSelector';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
@@ -462,8 +462,25 @@ export default function Convert() {
               pageCount={pageCount}
             />
 
-            {/* Warnings */}
-            {warnings.length > 0 && (
+            {/* Info Messages (fallback extraction) */}
+            {warnings.some(w => w.message.includes('No tables detected')) && (
+              <Card className="border-blue-200 bg-blue-50 dark:bg-blue-900/20">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg flex items-center gap-2 text-blue-700 dark:text-blue-400">
+                    <Info className="h-5 w-5" />
+                    Smart Extraction
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-blue-700 dark:text-blue-300">
+                    No traditional tables were detected in this document. The AI analyzed the content and extracted all structured data as Field/Value pairs.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Warnings (excluding info messages) */}
+            {warnings.filter(w => !w.message.includes('No tables detected')).length > 0 && (
               <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
@@ -473,7 +490,7 @@ export default function Convert() {
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-2">
-                    {warnings.map((warning, index) => (
+                    {warnings.filter(w => !w.message.includes('No tables detected')).map((warning, index) => (
                       <li key={index} className="text-sm">
                         <span className="font-medium">{warning.message}</span>
                         {warning.suggestion && (
