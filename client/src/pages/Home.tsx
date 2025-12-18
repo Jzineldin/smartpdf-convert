@@ -25,7 +25,7 @@ import {
   ArrowRight,
   Menu,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 
 const FEATURES = [
@@ -110,6 +110,11 @@ export default function Home() {
   const [, setLocation] = useLocation();
   const { isAuthenticated } = useSupabaseAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Set SEO title for the homepage
+  useEffect(() => {
+    document.title = 'Invoice to Excel - AI Data Extraction | SmartPDF Convert';
+  }, []);
 
   const handleFileSelect = (file: File, base64: string) => {
     // Store in sessionStorage and redirect to convert page

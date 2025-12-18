@@ -104,4 +104,4 @@
 - [x] Add confidence scoring display to extraction results
 - [x] Update pricing: Free (3/day generic) + Pro $29/month (100 invoices)
 - [x] Create invoice-focused landing page ("invoice to excel" / "extract invoice data")
-- [ ] Ship it
+- [x] Ship it

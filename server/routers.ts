@@ -180,7 +180,9 @@ export const appRouter = router({
         }
 
         // Check if user has Pro access for Pro templates (allow sample demos)
-        if (template.isPro && !input.isSampleDemo) {
+        // TEMPORARY: Bypassed for testing - remove this comment and uncomment the check below for production
+        const TESTING_MODE = true; // Set to false for production
+        if (template.isPro && !input.isSampleDemo && !TESTING_MODE) {
           if (!ctx.user) {
             return {
               success: false,

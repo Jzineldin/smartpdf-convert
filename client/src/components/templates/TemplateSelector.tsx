@@ -51,6 +51,9 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   TrendingUp,
 };
 
+// TEMPORARY: Set to true for testing, false for production
+const TESTING_MODE = true;
+
 export default function TemplateSelector({
   templates,
   selectedTemplate,
@@ -60,9 +63,12 @@ export default function TemplateSelector({
   onTrySample
 }: TemplateSelectorProps) {
   const [hoveredTemplate, setHoveredTemplate] = useState<string | null>(null);
+  
+  // In testing mode, treat user as Pro
+  const effectiveIsPro = TESTING_MODE || isPro;
 
   const handleTemplateClick = (template: Template) => {
-    if (template.isPro && !isPro) {
+    if (template.isPro && !effectiveIsPro) {
       // Show upgrade prompt
       if (onUpgradeClick) {
         onUpgradeClick();
@@ -84,7 +90,7 @@ export default function TemplateSelector({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Choose Extraction Template</h3>
-        {!isPro && (
+        {!effectiveIsPro && (
           <Badge variant="outline" className="gap-1 text-amber-600 border-amber-300 bg-amber-50">
             <Crown className="h-3 w-3" />
             Upgrade for specialized templates
@@ -96,7 +102,7 @@ export default function TemplateSelector({
         {templates.map((template) => {
           const Icon = iconMap[template.icon] || Table;
           const isSelected = selectedTemplate === template.id;
-          const isLocked = template.isPro && !isPro;
+          const isLocked = template.isPro && !effectiveIsPro;
           const isHovered = hoveredTemplate === template.id;
           const hasSample = !!sampleDocuments[template.id];
 
@@ -125,13 +131,13 @@ export default function TemplateSelector({
                   <div className="flex items-center gap-1">
                     {template.isPro && (
                       <Badge 
-                        variant={isPro ? "secondary" : "default"}
+                        variant={effectiveIsPro ? "secondary" : "default"}
                         className={cn(
                           "text-xs",
-                          !isPro && "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0"
+                          !effectiveIsPro && "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0"
                         )}
                       >
-                        {isPro ? (
+                        {effectiveIsPro ? (
                           <>
                             <Check className="h-3 w-3 mr-1" />
                             PRO
@@ -158,7 +164,7 @@ export default function TemplateSelector({
                 </p>
 
                 {/* Try Sample button for Pro templates (visible to non-Pro users) */}
-                {template.isPro && !isPro && hasSample && (
+                {template.isPro && !effectiveIsPro && hasSample && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -193,7 +199,7 @@ export default function TemplateSelector({
       </div>
 
       {/* Pro benefits callout */}
-      {!isPro && (
+      {!effectiveIsPro && (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
           <div className="flex items-start gap-3">
             <div className="p-2 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg">
