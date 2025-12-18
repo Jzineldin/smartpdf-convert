@@ -81,6 +81,8 @@ TESTING_MODE=false  # Set to true for development without auth/payment
 
 ## Installation & Setup
 
+**⚠️ Windows Users**: See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for Windows-specific instructions.
+
 ### 1. Clone the Repository
 
 ```bash
@@ -173,6 +175,14 @@ smartpdf-convert/
 ├── drizzle.config.ts         # Drizzle ORM config
 └── README.md                 # This file
 ```
+
+## Documentation Files
+
+Make sure to read these files for complete setup information:
+
+- **[WINDOWS_SETUP.md](WINDOWS_SETUP.md)** - Complete Windows 10/11 setup guide with all prerequisites
+- **[DEPENDENCIES.md](DEPENDENCIES.md)** - Complete list of all 120+ npm packages and system requirements
+- **[ENV_VARIABLES.md](ENV_VARIABLES.md)** - Detailed guide for all environment variables
 
 ## Key Files
 
