@@ -20,6 +20,7 @@ import {
   seedTemplates,
 } from "./db";
 import { extractTablesFromPDF } from "./lib/openrouter";
+import { validateImageBase64 } from "./lib/pdfToImage";
 import { tablesToExcel, spreadsheetDataToExcel } from "./lib/excel";
 import { createCheckoutSession, createPortalSession, getStripeConfig } from "./lib/stripe";
 import { storagePut } from "./storage";
@@ -169,11 +170,35 @@ export const appRouter = router({
         }
 
         try {
+          // Validate and detect file type
+          const validation = await validateImageBase64(input.fileBase64);
+          console.log('File validation:', validation);
+          
+          // Use detected mime type or fall back to provided
+          const actualMimeType = validation.mimeType || input.mimeType;
+          
+          // If it's a PDF, we need to inform the user to convert it first
+          // GPT-4V doesn't support PDF files directly
+          if (actualMimeType === 'application/pdf') {
+            await updateConversion(conversion.id, {
+              status: 'failed',
+              errorCode: 'PDF_NOT_SUPPORTED',
+              errorMessage: 'Please convert your PDF to an image (PNG or JPG) first. You can use a free online tool or take a screenshot of the PDF pages.',
+            });
+
+            return {
+              success: false,
+              conversionId: conversion.id,
+              error: 'PDF files must be converted to images first. Please upload a PNG or JPG screenshot of your PDF table.',
+              errorCode: 'PDF_NOT_SUPPORTED',
+            };
+          }
+          
           // Extract tables using AI
           const result = await extractTablesFromPDF(
             input.fileBase64,
             input.fileName,
-            input.mimeType
+            actualMimeType
           );
 
           if (!result.success) {

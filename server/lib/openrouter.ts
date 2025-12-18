@@ -73,9 +73,9 @@ WARNING TYPES:
 - inconsistent_format: Dates, numbers, or currencies in inconsistent formats`;
 
 export async function extractTablesFromPDF(
-  imageBase64: string,
+  fileBase64: string,
   fileName: string,
-  mimeType: string = 'image/png'
+  mimeType: string = 'application/pdf'
 ): Promise<ExtractionResult> {
   const startTime = Date.now();
 
@@ -92,6 +92,25 @@ export async function extractTablesFromPDF(
   }
 
   try {
+    // Ensure base64 is clean (no data URL prefix)
+    let cleanBase64 = fileBase64;
+    if (fileBase64.includes(',')) {
+      cleanBase64 = fileBase64.split(',')[1];
+    }
+    
+    // Remove any whitespace or newlines from base64
+    cleanBase64 = cleanBase64.replace(/\s/g, '');
+
+    // For PDF files, we need to send as image/png or convert
+    // OpenRouter/GPT-4V expects image formats, not PDF
+    // We'll use image/png as the mime type for the data URL
+    const imageMimeType = mimeType === 'application/pdf' ? 'image/png' : mimeType;
+    
+    // Create proper data URL format
+    const dataUrl = `data:${imageMimeType};base64,${cleanBase64}`;
+
+    console.log(`Processing file: ${fileName}, mime: ${mimeType}, base64 length: ${cleanBase64.length}`);
+
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -112,12 +131,12 @@ export async function extractTablesFromPDF(
             content: [
               {
                 type: 'text',
-                text: `Extract all tables from this PDF document: "${fileName}". Return valid JSON only, no markdown code blocks.`,
+                text: `Extract all tables from this document: "${fileName}". Return valid JSON only, no markdown code blocks.`,
               },
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:${mimeType};base64,${imageBase64}`,
+                  url: dataUrl,
                   detail: 'high',
                 },
               },
@@ -132,6 +151,20 @@ export async function extractTablesFromPDF(
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenRouter API error:', errorText);
+      
+      // Check for specific error types
+      if (errorText.includes('Invalid image URL')) {
+        return {
+          success: false,
+          tables: [],
+          warnings: [],
+          confidence: 0,
+          processingTime: Date.now() - startTime,
+          error: 'Unable to process this PDF. Please try converting it to an image (PNG/JPG) first, or use a different PDF.',
+          errorCode: 'INVALID_IMAGE_FORMAT',
+        };
+      }
+      
       return {
         success: false,
         tables: [],

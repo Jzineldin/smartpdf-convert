@@ -22,7 +22,7 @@ export default function DropZone({ onFileSelect, disabled = false, maxSize = 20 
       if (rejection.errors[0]?.code === 'file-too-large') {
         setError(`File too large. Maximum size is ${Math.round(maxSize / 1024 / 1024)}MB.`);
       } else if (rejection.errors[0]?.code === 'file-invalid-type') {
-        setError('Only PDF files are supported.');
+        setError('Only PDF, PNG, and JPG files are supported.');
       } else {
         setError('Invalid file. Please upload a PDF.');
       }
@@ -50,6 +50,9 @@ export default function DropZone({ onFileSelect, disabled = false, maxSize = 20 
     onDrop,
     accept: {
       'application/pdf': ['.pdf'],
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/webp': ['.webp'],
     },
     maxSize,
     multiple: false,
@@ -120,10 +123,10 @@ export default function DropZone({ onFileSelect, disabled = false, maxSize = 20 
                 </p>
               </div>
               <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <FileText className="h-3 w-3" />
-                  PDF only
-                </span>
+<span className="flex items-center gap-1">
+                    <FileText className="h-3 w-3" />
+                    PDF, PNG, JPG
+                  </span>
                 <span>•</span>
                 <span>Max {Math.round(maxSize / 1024 / 1024)}MB</span>
               </div>

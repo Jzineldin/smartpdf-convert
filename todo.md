@@ -51,3 +51,6 @@
 - [x] Stripe webhook endpoint for subscription events
 - [x] Real-time spreadsheet editor for reviewing/editing extracted data
 - [x] Google OAuth configuration instructions
+
+## Bug Fixes
+- [x] Fix OpenRouter API integration - Updated to accept PNG/JPG images directly, PDF files now show helpful error message to convert to image first

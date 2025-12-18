@@ -89,7 +89,7 @@ const TESTIMONIALS = [
 const FAQ = [
   {
     question: 'What file types are supported?',
-    answer: 'Currently we support PDF files up to 20MB. The PDF can contain scanned images, digital text, or a mix of both.',
+    answer: 'We support PDF, PNG, JPG, and WebP files up to 20MB. For best results with PDFs, we recommend taking a screenshot or converting to an image first.',
   },
   {
     question: 'How accurate is the extraction?',
