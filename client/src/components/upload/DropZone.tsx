@@ -116,7 +116,7 @@ export default function DropZone({ onFileSelect, disabled = false, maxSize = 20 
               </div>
               <div className="space-y-2">
                 <p className="text-lg font-medium text-foreground">
-                  {isDragActive ? 'Drop your PDF here' : 'Drag & drop your PDF here'}
+                  {isDragActive ? 'Drop your file here' : 'Drag & drop your file here'}
                 </p>
                 <p className="text-sm text-muted-foreground">
                   or click to browse

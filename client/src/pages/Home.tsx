@@ -2,6 +2,7 @@ import { Link, useLocation } from 'wouter';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import { trpc } from '@/lib/trpc';
 import DropZone from '@/components/upload/DropZone';
+import PdfHelper from '@/components/upload/PdfHelper';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -198,16 +199,17 @@ export default function Home() {
               </Badge>
               
               <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight">
-                Transform Any PDF Table Into{' '}
+                Transform Any Table Into{' '}
                 <span className="text-blue-600">Clean Excel Data</span>
               </h1>
               
               <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto">
-                AI-powered extraction that actually works on scanned documents, messy formatting, and complex layouts.
+                Upload PDFs, screenshots, or images. Our AI extracts tables from scanned documents, messy formatting, and complex layouts.
               </p>
 
-              <div className="pt-8 max-w-lg mx-auto">
+              <div className="pt-8 max-w-lg mx-auto space-y-4">
                 <DropZone onFileSelect={handleFileSelect} />
+                <PdfHelper />
               </div>
 
               <div className="flex flex-wrap items-center justify-center gap-6 text-sm text-muted-foreground pt-4">

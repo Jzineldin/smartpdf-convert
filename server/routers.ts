@@ -20,7 +20,7 @@ import {
   seedTemplates,
 } from "./db";
 import { extractTablesFromPDF } from "./lib/openrouter";
-import { validateImageBase64 } from "./lib/pdfToImage";
+import { validateImageBase64, convertPdfToImages } from "./lib/pdfToImage";
 import { tablesToExcel, spreadsheetDataToExcel } from "./lib/excel";
 import { createCheckoutSession, createPortalSession, getStripeConfig } from "./lib/stripe";
 import { storagePut } from "./storage";
@@ -177,28 +177,40 @@ export const appRouter = router({
           // Use detected mime type or fall back to provided
           const actualMimeType = validation.mimeType || input.mimeType;
           
-          // If it's a PDF, we need to inform the user to convert it first
-          // GPT-4V doesn't support PDF files directly
+          // Handle PDF files by converting to images first
+          let imageBase64 = input.fileBase64;
+          let imageMimeType = actualMimeType;
+          
           if (actualMimeType === 'application/pdf') {
-            await updateConversion(conversion.id, {
-              status: 'failed',
-              errorCode: 'PDF_NOT_SUPPORTED',
-              errorMessage: 'Please convert your PDF to an image (PNG or JPG) first. You can use a free online tool or take a screenshot of the PDF pages.',
-            });
+            console.log('Converting PDF to images...');
+            const pdfConversion = await convertPdfToImages(input.fileBase64, 5); // Max 5 pages
+            
+            if (!pdfConversion.success || pdfConversion.pages.length === 0) {
+              await updateConversion(conversion.id, {
+                status: 'failed',
+                errorCode: 'PDF_CONVERSION_FAILED',
+                errorMessage: pdfConversion.error || 'Failed to convert PDF to images',
+              });
 
-            return {
-              success: false,
-              conversionId: conversion.id,
-              error: 'PDF files must be converted to images first. Please upload a PNG or JPG screenshot of your PDF table.',
-              errorCode: 'PDF_NOT_SUPPORTED',
-            };
+              return {
+                success: false,
+                conversionId: conversion.id,
+                error: pdfConversion.error || 'Failed to convert PDF. Please try uploading a screenshot of the PDF instead.',
+                errorCode: 'PDF_CONVERSION_FAILED',
+              };
+            }
+            
+            // Use the first page for now (we can extend to multi-page later)
+            imageBase64 = pdfConversion.pages[0].base64;
+            imageMimeType = 'image/png';
+            console.log(`PDF converted successfully, ${pdfConversion.totalPages} page(s)`);
           }
           
           // Extract tables using AI
           const result = await extractTablesFromPDF(
-            input.fileBase64,
+            imageBase64,
             input.fileName,
-            actualMimeType
+            imageMimeType
           );
 
           if (!result.success) {

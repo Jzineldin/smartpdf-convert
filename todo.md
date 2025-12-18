@@ -54,3 +54,8 @@
 
 ## Bug Fixes
 - [x] Fix OpenRouter API integration - Updated to accept PNG/JPG images directly, PDF files now show helpful error message to convert to image first
+
+## New Improvements (In Progress)
+- [x] Server-side PDF-to-image conversion for automatic PDF processing
+- [x] Update landing page text to reflect multi-format support
+- [x] Add PDF conversion helper with instructions for users
