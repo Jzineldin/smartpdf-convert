@@ -5,25 +5,35 @@ import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import DropZone from '@/components/upload/DropZone';
 import ProcessingStatus, { ProcessingStep } from '@/components/upload/ProcessingStatus';
 import SpreadsheetEditor from '@/components/editor/SpreadsheetEditor';
+import AnalysisDialog from '@/components/analysis/AnalysisDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files, Info } from 'lucide-react';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files, Info, Loader2 } from 'lucide-react';
 import TemplateSelector from '@/components/templates/TemplateSelector';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
 
-const CACHE_KEY = 'smartpdf_last_conversion';
-const CACHE_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+// Removed localStorage caching - each session starts fresh
+// History is available in dashboard for logged-in users
 
-interface CachedConversion {
-  tables: ExtractedTable[];
-  warnings: AIWarning[];
-  confidence: number;
-  fileName: string;
-  pageCount?: number;
-  timestamp: number;
+// ConfidenceBreakdown type for detailed confidence info
+interface ConfidenceBreakdown {
+  overall: number;
+  breakdown: {
+    textClarity: number;
+    structureClarity: number;
+    specialChars: number;
+    completeness: number;
+  };
+  uncertainCells: Array<{
+    row: number;
+    col: number;
+    value: string;
+    confidence: number;
+    reason: string;
+  }>;
 }
 
 interface ExtractedTable {
@@ -31,18 +41,78 @@ interface ExtractedTable {
   headers: string[];
   rows: (string | null)[][];
   pageNumber: number;
-  confidence: number;
+  confidence: number | ConfidenceBreakdown;
 }
 
 interface TableWithSource extends ExtractedTable {
   sourceFile: string;
 }
 
+// Helper to get confidence as a number (handles both formats)
+const getConfidenceValue = (confidence: number | ConfidenceBreakdown): number => {
+  if (typeof confidence === 'number') {
+    return confidence;
+  }
+  return confidence.overall;
+};
+
 interface AIWarning {
   type: string;
   message: string;
   pageNumber?: number;
   suggestion: string;
+}
+
+// Analysis types matching server definitions
+interface DocumentAnalysis {
+  analysis: {
+    documentType: string;
+    pageCount: number;
+    tablesDetected: number;
+    languages: string[];
+    complexity: 'low' | 'medium' | 'high';
+    estimatedExtractionTime: string;
+  };
+  questions: AnalysisQuestion[];
+  suggestions: Suggestion[];
+  warnings: string[];
+  uncertainPatterns?: UncertainPattern[];
+}
+
+interface UncertainPattern {
+  pattern: string;
+  pagesDetected: number[];
+  count: number;
+  likelyMeaning: string;
+}
+
+interface AnalysisQuestion {
+  id: string;
+  category: 'symbols' | 'structure' | 'content' | 'output';
+  question: string;
+  options?: string[];
+  context: string;
+  default?: string;
+}
+
+interface Suggestion {
+  id: string;
+  text: string;
+  action: string;
+  accepted?: boolean;
+}
+
+interface UserGuidance {
+  answers: Record<string, string>;
+  acceptedSuggestions: string[];
+  freeformInstructions?: string;
+  outputPreferences?: {
+    combineRelatedTables: boolean;
+    outputLanguage: 'auto' | 'english' | 'swedish' | 'german' | 'spanish' | 'french';
+    skipDiagrams: boolean;
+    skipImages: boolean;
+    symbolMapping?: Record<string, string>;
+  };
 }
 
 export default function Convert() {
@@ -64,56 +134,298 @@ export default function Convert() {
   const [accumulatedTables, setAccumulatedTables] = useState<TableWithSource[]>([]);
   const [processedFiles, setProcessedFiles] = useState<string[]>([]);
 
+  // Pending file(s) from landing page
+  const [pendingFile, setPendingFile] = useState<{ name: string; size: number; base64: string } | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<Array<{ name: string; size: number; type: string; base64: string }> | null>(null);
+
+  // Intelligent analysis flow state
+  const [analysisResult, setAnalysisResult] = useState<DocumentAnalysis | null>(null);
+  const [currentFileData, setCurrentFileData] = useState<{ base64: string; mimeType: string; name: string; size: number } | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
+
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
   const processMutation = trpc.conversion.process.useMutation();
+  const analyzeMutation = trpc.conversion.analyze.useMutation();
+  const extractWithGuidanceMutation = trpc.conversion.extractWithGuidance.useMutation();
 
   // Check if user has Pro access (or TESTING_MODE is enabled)
   const isPro = templatesData?.userIsPro ?? false;
 
-  // Load cached conversion on mount
+  // Each visit to /convert starts fresh - no localStorage caching
+  // History is available in the Dashboard for logged-in users
+  useEffect(() => {
+    // Clean up any old localStorage cache from previous versions
+    localStorage.removeItem('smartpdf_last_conversion');
+  }, []);
+
+  // Check for pending file(s) from landing page
   useEffect(() => {
     try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const data: CachedConversion = JSON.parse(cached);
-        // Check if cache is still valid (not expired)
-        if (Date.now() - data.timestamp < CACHE_EXPIRY_MS) {
-          setExtractedTables(data.tables);
-          setWarnings(data.warnings);
-          setConfidence(data.confidence);
-          setFileName(data.fileName);
-          setPageCount(data.pageCount);
-          setProcessingStep('ready');
-          toast.info('Restored your previous conversion. Click "Convert Another" to start fresh.');
-        } else {
-          // Cache expired, remove it
-          localStorage.removeItem(CACHE_KEY);
+      // Check for multiple files first (Pro feature)
+      const pendingMultiple = sessionStorage.getItem('pendingFiles');
+      if (pendingMultiple) {
+        const filesData = JSON.parse(pendingMultiple);
+        if (Array.isArray(filesData) && filesData.length > 0) {
+          setPendingFiles(filesData);
+          setFileName(`${filesData.length} files ready`);
+          sessionStorage.removeItem('pendingFiles');
+          toast.info(`${filesData.length} files ready - select a template and click Convert`);
+          return;
         }
       }
+
+      // Check for single file
+      const pending = sessionStorage.getItem('pendingFile');
+      if (pending) {
+        const fileData = JSON.parse(pending);
+        setPendingFile(fileData);
+        setFileName(fileData.name);
+        sessionStorage.removeItem('pendingFile');
+        toast.info(`"${fileData.name}" ready - select a template and click Convert`);
+      }
     } catch (e) {
-      // Invalid cache, remove it
-      localStorage.removeItem(CACHE_KEY);
+      sessionStorage.removeItem('pendingFile');
+      sessionStorage.removeItem('pendingFiles');
     }
   }, []);
 
-  // Save to cache whenever extraction completes
-  const saveToCache = useCallback((tables: ExtractedTable[], warns: AIWarning[], conf: number, name: string, pages?: number) => {
-    try {
-      const cacheData: CachedConversion = {
-        tables,
-        warnings: warns,
-        confidence: conf,
-        fileName: name,
-        pageCount: pages,
-        timestamp: Date.now(),
-      };
-      localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
-    } catch (e) {
-      // localStorage might be full or disabled, ignore
-      console.warn('Failed to cache conversion:', e);
+
+  // Process the pending file from landing page
+  const processPendingFile = useCallback(async () => {
+    if (!pendingFile) return;
+
+    setError(null);
+    setExtractedTables(null);
+    setWarnings([]);
+    setViewMode('preview');
+
+    // Check usage limit
+    if (usageData && !usageData.allowed) {
+      setError(usageData.message || 'Usage limit exceeded');
+      return;
     }
-  }, []);
+
+    setProcessingStep('upload');
+
+    try {
+      setProcessingStep('analyze');
+
+      const result = await processMutation.mutateAsync({
+        fileBase64: pendingFile.base64,
+        fileName: pendingFile.name,
+        fileSize: pendingFile.size,
+        mimeType: 'application/pdf',
+        templateId: selectedTemplate,
+      });
+
+      if (result.success && result.tables) {
+        setProcessingStep('ready');
+        setExtractedTables(result.tables);
+        const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+        setWarnings(validWarnings);
+        setConfidence(result.confidence || 0);
+        setConversionId(result.conversionId || null);
+        setPageCount(result.pageCount);
+
+        // Clear pending file
+        setPendingFile(null);
+      } else {
+        setError(result.error || 'No tables could be extracted');
+        setProcessingStep('ready');
+      }
+    } catch (err) {
+      console.error('Conversion error:', err);
+      setError('Failed to process document. Please try again.');
+      setProcessingStep('ready');
+    }
+  }, [pendingFile, usageData, selectedTemplate, processMutation]);
+
+  // Process pending multiple files from landing page (Pro feature)
+  const processPendingFiles = useCallback(async () => {
+    if (!pendingFiles || pendingFiles.length === 0) return;
+
+    setError(null);
+    setExtractedTables(null);
+    setWarnings([]);
+    setViewMode('preview');
+
+    // Check usage limit
+    if (usageData && !usageData.allowed) {
+      setError(usageData.message || 'Usage limit exceeded');
+      return;
+    }
+
+    // Clear previous batch
+    setAccumulatedTables([]);
+    setProcessedFiles([]);
+
+    const allTables: TableWithSource[] = [];
+    const allWarnings: AIWarning[] = [];
+    let totalConfidence = 0;
+    let failedFiles: string[] = [];
+
+    setProcessingStep('upload');
+    toast.info(`Processing ${pendingFiles.length} files...`);
+
+    for (let i = 0; i < pendingFiles.length; i++) {
+      const fileData = pendingFiles[i];
+
+      try {
+        setFileName(`Processing ${i + 1}/${pendingFiles.length}: ${fileData.name}`);
+        setProcessingStep('analyze');
+
+        const result = await processMutation.mutateAsync({
+          fileBase64: fileData.base64,
+          fileName: fileData.name,
+          fileSize: fileData.size,
+          mimeType: fileData.type || 'application/pdf',
+          templateId: selectedTemplate,
+        });
+
+        if (result.success && result.tables) {
+          const tablesWithSource: TableWithSource[] = result.tables.map((t) => {
+            const shortFileName = fileData.name.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, '').slice(0, 12);
+            let sheetName = pendingFiles.length > 1
+              ? `${t.sheetName.slice(0, 17)}-${shortFileName}`
+              : t.sheetName;
+            if (sheetName.length > 31) {
+              sheetName = sheetName.slice(0, 31);
+            }
+            return { ...t, sheetName, sourceFile: fileData.name };
+          });
+
+          allTables.push(...tablesWithSource);
+          totalConfidence += result.confidence || 0;
+
+          const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+          allWarnings.push(...validWarnings);
+
+          setProcessedFiles(prev => [...prev, fileData.name]);
+        } else {
+          failedFiles.push(fileData.name);
+        }
+      } catch (err: any) {
+        console.error(`Failed to process ${fileData.name}:`, err);
+        failedFiles.push(fileData.name);
+      }
+    }
+
+    // Set final results
+    setProcessingStep('ready');
+    setAccumulatedTables(allTables);
+    setExtractedTables(allTables);
+    setWarnings(allWarnings);
+    setConfidence(allTables.length > 0 ? totalConfidence / (pendingFiles.length - failedFiles.length) : 0);
+    setFileName(pendingFiles.length > 1 ? 'combined-export' : pendingFiles[0].name);
+
+    // Clear pending files
+    setPendingFiles(null);
+
+    if (failedFiles.length > 0) {
+      toast.warning(`${failedFiles.length} file(s) failed to process: ${failedFiles.join(', ')}`);
+    }
+
+    if (allTables.length > 0) {
+      toast.success(`Extracted ${allTables.length} table(s) from ${pendingFiles.length - failedFiles.length} file(s)!`);
+    } else {
+      setError('No tables could be extracted from any of the files');
+    }
+  }, [pendingFiles, usageData, selectedTemplate, processMutation]);
+
+  // Handle multiple files at once (Pro feature)
+  const handleMultipleFilesSelect = useCallback(async (files: Array<{ file: File; base64: string }>) => {
+    if (!isPro || files.length === 0) return;
+
+    setError(null);
+    setExtractedTables(null);
+    setWarnings([]);
+    setViewMode('preview');
+    setPendingFile(null);
+
+    // Check usage limit
+    if (usageData && !usageData.allowed) {
+      setError(usageData.message || 'Usage limit exceeded');
+      return;
+    }
+
+    // Clear previous batch
+    setAccumulatedTables([]);
+    setProcessedFiles([]);
+
+    const allTables: TableWithSource[] = [];
+    const allWarnings: AIWarning[] = [];
+    let totalConfidence = 0;
+    let failedFiles: string[] = [];
+
+    setProcessingStep('upload');
+    toast.info(`Processing ${files.length} files...`);
+
+    for (let i = 0; i < files.length; i++) {
+      const { file, base64 } = files[i];
+
+      try {
+        setFileName(`Processing ${i + 1}/${files.length}: ${file.name}`);
+        setProcessingStep('analyze');
+
+        const result = await processMutation.mutateAsync({
+          fileBase64: base64,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type || 'application/pdf',
+          templateId: selectedTemplate,
+        });
+
+        if (result.success && result.tables) {
+          // Add source file to each table
+          const tablesWithSource: TableWithSource[] = result.tables.map((t, idx) => {
+            const shortFileName = file.name.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, '').slice(0, 12);
+            let sheetName = files.length > 1
+              ? `${t.sheetName.slice(0, 17)}-${shortFileName}`
+              : t.sheetName;
+            // Ensure sheet name is within Excel's 31 char limit
+            if (sheetName.length > 31) {
+              sheetName = sheetName.slice(0, 31);
+            }
+            return { ...t, sheetName, sourceFile: file.name };
+          });
+
+          allTables.push(...tablesWithSource);
+          totalConfidence += result.confidence || 0;
+
+          // Collect warnings
+          const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+          allWarnings.push(...validWarnings);
+
+          setProcessedFiles(prev => [...prev, file.name]);
+        } else {
+          failedFiles.push(file.name);
+        }
+      } catch (err: any) {
+        console.error(`Failed to process ${file.name}:`, err);
+        failedFiles.push(file.name);
+      }
+    }
+
+    // Set final results
+    setProcessingStep('ready');
+    setAccumulatedTables(allTables);
+    setExtractedTables(allTables);
+    setWarnings(allWarnings);
+    setConfidence(allTables.length > 0 ? totalConfidence / (files.length - failedFiles.length) : 0);
+    setFileName(files.length > 1 ? 'combined-export' : files[0].file.name);
+
+    if (failedFiles.length > 0) {
+      toast.warning(`${failedFiles.length} file(s) failed to process: ${failedFiles.join(', ')}`);
+    }
+
+    if (allTables.length > 0) {
+      toast.success(`Extracted ${allTables.length} table(s) from ${files.length - failedFiles.length} file(s)!`);
+    } else {
+      setError('No tables could be extracted from any of the files');
+    }
+  }, [isPro, usageData, processMutation, selectedTemplate]);
 
   const handleFileSelect = useCallback(async (file: File, base64: string) => {
     setError(null);
@@ -124,88 +436,85 @@ export default function Convert() {
     setWarnings([]);
     setViewMode('preview');
     setFileName(file.name);
-    
+
     // Check usage limit
     if (usageData && !usageData.allowed) {
       setError(usageData.message || 'Usage limit exceeded');
       return;
     }
 
+    const mimeType = file.type || 'application/pdf';
+
+    // Store file data for later extraction
+    setCurrentFileData({
+      base64,
+      mimeType,
+      name: file.name,
+      size: file.size,
+    });
+
     setProcessingStep('upload');
+    setIsAnalyzing(true);
 
     try {
-      // For PDFs, we need to convert to images first
-      // For now, we'll send the PDF as base64 and let the server handle it
+      // NEW: Analyze document first to get questions and suggestions
       setProcessingStep('analyze');
+      toast.info('Analyzing your document...');
 
-      const result = await processMutation.mutateAsync({
+      const analysisRes = await analyzeMutation.mutateAsync({
         fileBase64: base64,
         fileName: file.name,
-        fileSize: file.size,
-        mimeType: 'application/pdf',
-        templateId: selectedTemplate,
+        mimeType,
       });
 
-      if (!result.success) {
-        setProcessingStep('error');
-        setError(result.error || 'Processing failed');
-        return;
-      }
+      console.log('Analysis response:', analysisRes);
+      setIsAnalyzing(false);
 
-      setProcessingStep('extract');
-      await new Promise(resolve => setTimeout(resolve, 500)); // Brief delay for UX
+      if (analysisRes.success && analysisRes.analysis) {
+        console.log('Analysis successful, showing dialog:', analysisRes.analysis);
+        // Show analysis dialog
+        setAnalysisResult(analysisRes.analysis);
+        setProcessingStep(null); // Clear processing step to show dialog
+        toast.success('Document analyzed! Review the details and extract.');
+      } else {
+        console.log('Analysis failed or no analysis returned:', analysisRes);
+        // Analysis failed - fall back to quick extraction
+        console.log('Analysis unavailable, falling back to quick extraction');
+        toast.info('Proceeding with quick extraction...');
 
-      setProcessingStep('verify');
-      await new Promise(resolve => setTimeout(resolve, 300));
+        setProcessingStep('extract');
 
-      setProcessingStep('ready');
-
-      // For Pro users with batch mode, add source file info and accumulate
-      const currentTables = result.tables || [];
-
-      if (isPro) {
-        // Add source file to each table and potentially modify sheet names
-        const tablesWithSource: TableWithSource[] = currentTables.map(t => {
-          let sheetName = t.sheetName;
-          // Add filename suffix if we already have files processed (to avoid duplicates)
-          if (processedFiles.length > 0) {
-            const shortFileName = file.name.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, '').slice(0, 12);
-            sheetName = `${t.sheetName.slice(0, 17)}-${shortFileName}`;
-          }
-          // Ensure sheet name is within Excel's 31 char limit
-          if (sheetName.length > 31) {
-            sheetName = sheetName.slice(0, 31);
-          }
-          return { ...t, sheetName, sourceFile: file.name };
+        const result = await processMutation.mutateAsync({
+          fileBase64: base64,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType,
+          templateId: selectedTemplate,
         });
 
-        // Accumulate tables
-        setAccumulatedTables(prev => [...prev, ...tablesWithSource]);
-        setProcessedFiles(prev => [...prev, file.name]);
-        setExtractedTables(tablesWithSource);
-      } else {
-        // Free users: just replace (existing behavior)
-        setExtractedTables(currentTables);
+        if (!result.success) {
+          setProcessingStep('error');
+          setError(result.error || 'Processing failed');
+          return;
+        }
+
+        setProcessingStep('ready');
+        setExtractedTables(result.tables || []);
+        const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+        setWarnings(validWarnings);
+        setConfidence(result.confidence || 0);
+        setConversionId(result.conversionId || null);
+        setPageCount(result.pageCount || undefined);
+        setCurrentFileData(null);
+
+        toast.success(`Extracted ${result.tables?.length || 0} table(s)!`);
       }
-
-      setWarnings(result.warnings || []);
-      setConfidence(result.confidence || 0);
-      setConversionId(result.conversionId || null);
-      setPageCount(result.pageCount || undefined);
-
-      // Cache the results (only for single file, not batch)
-      if (!isPro || processedFiles.length === 0) {
-        saveToCache(result.tables || [], result.warnings || [], result.confidence || 0, file.name, result.pageCount);
-      }
-
-      const pageInfo = result.pageCount && result.pageCount > 1 ? ` from ${result.pageCount} pages` : '';
-      const batchInfo = isPro && processedFiles.length > 0 ? ` (${processedFiles.length + 1} files total)` : '';
-      toast.success(`Successfully extracted ${result.tables?.length || 0} table(s)${pageInfo}${batchInfo}!`);
     } catch (err: any) {
+      setIsAnalyzing(false);
       setProcessingStep('error');
       setError(err.message || 'An unexpected error occurred');
     }
-  }, [usageData, processMutation, saveToCache, isPro, processedFiles]);
+  }, [usageData, analyzeMutation, processMutation, isPro, processedFiles, selectedTemplate]);
 
   const handleTrySample = useCallback(async (templateId: string, sampleUrl: string) => {
     setError(null);
@@ -264,13 +573,12 @@ export default function Convert() {
 
       setProcessingStep('ready');
       setExtractedTables(result.tables || []);
-      setWarnings(result.warnings || []);
+      // Ensure warnings array has valid objects with message property
+      const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+      setWarnings(validWarnings);
       setConfidence(result.confidence || 0);
       setConversionId(result.conversionId || null);
       setPageCount(result.pageCount || undefined);
-
-      // Cache the results
-      saveToCache(result.tables || [], result.warnings || [], result.confidence || 0, sampleFileName, result.pageCount);
 
       toast.success(`Sample processed! See what ${templateId.replace('-', ' ')} template can do.`);
     } catch (err: any) {
@@ -279,7 +587,7 @@ export default function Convert() {
     } finally {
       setIsTryingSample(false);
     }
-  }, [processMutation, saveToCache]);
+  }, [processMutation]);
 
   const handleReset = () => {
     setProcessingStep(null);
@@ -294,9 +602,103 @@ export default function Convert() {
     // Clear batch state
     setAccumulatedTables([]);
     setProcessedFiles([]);
-    // Clear the cache when user wants to start fresh
-    localStorage.removeItem(CACHE_KEY);
+    // Clear any pending files
+    setPendingFile(null);
+    setPendingFiles(null);
+    // Clear analysis state
+    setAnalysisResult(null);
+    setCurrentFileData(null);
+    setIsAnalyzing(false);
+    setIsExtracting(false);
   };
+
+  // Handler for guided extraction after analysis dialog
+  const handleGuidedExtract = useCallback(async (guidance: UserGuidance) => {
+    if (!currentFileData) return;
+
+    setIsExtracting(true);
+    setError(null);
+
+    try {
+      const result = await extractWithGuidanceMutation.mutateAsync({
+        fileBase64: currentFileData.base64,
+        fileName: currentFileData.name,
+        fileSize: currentFileData.size,
+        mimeType: currentFileData.mimeType,
+        guidance,
+      });
+
+      if (result.success && result.tables) {
+        setProcessingStep('ready');
+        setExtractedTables(result.tables);
+        const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+        setWarnings(validWarnings);
+        setConfidence(result.confidence || 0);
+        setConversionId(result.conversionId || null);
+        setPageCount(result.pageCount);
+
+        // Clear analysis state
+        setAnalysisResult(null);
+        setCurrentFileData(null);
+
+        toast.success(`Extracted ${result.tables.length} table(s) with your preferences!`);
+      } else {
+        setError(result.error || 'No tables could be extracted');
+        setProcessingStep('ready');
+      }
+    } catch (err: any) {
+      console.error('Guided extraction error:', err);
+      setError(err.message || 'Failed to extract data. Please try again.');
+      setProcessingStep('ready');
+    } finally {
+      setIsExtracting(false);
+    }
+  }, [currentFileData, selectedTemplate, extractWithGuidanceMutation]);
+
+  // Handler for quick extraction (skip analysis dialog)
+  const handleQuickExtract = useCallback(async () => {
+    if (!currentFileData) return;
+
+    setIsExtracting(true);
+    setAnalysisResult(null);
+    setError(null);
+
+    try {
+      setProcessingStep('extract');
+
+      const result = await processMutation.mutateAsync({
+        fileBase64: currentFileData.base64,
+        fileName: currentFileData.name,
+        fileSize: currentFileData.size,
+        mimeType: currentFileData.mimeType,
+        templateId: selectedTemplate,
+      });
+
+      if (result.success && result.tables) {
+        setProcessingStep('ready');
+        setExtractedTables(result.tables);
+        const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+        setWarnings(validWarnings);
+        setConfidence(result.confidence || 0);
+        setConversionId(result.conversionId || null);
+        setPageCount(result.pageCount);
+
+        // Clear file data
+        setCurrentFileData(null);
+
+        toast.success(`Extracted ${result.tables.length} table(s)!`);
+      } else {
+        setError(result.error || 'No tables could be extracted');
+        setProcessingStep('ready');
+      }
+    } catch (err: any) {
+      console.error('Quick extraction error:', err);
+      setError(err.message || 'Failed to extract data. Please try again.');
+      setProcessingStep('ready');
+    } finally {
+      setIsExtracting(false);
+    }
+  }, [currentFileData, selectedTemplate, processMutation]);
 
   // Pro feature: Add another file to the batch
   const handleAddAnotherFile = () => {
@@ -345,7 +747,7 @@ export default function Convert() {
         </div>
 
         {/* Upload Area */}
-        {!processingStep && !extractedTables && (
+        {!processingStep && !extractedTables && !analysisResult && (
           <div className="max-w-3xl mx-auto space-y-6">
             {/* Batch mode indicator for Pro users adding more files */}
             {isPro && processedFiles.length > 0 && (
@@ -381,8 +783,76 @@ export default function Convert() {
               />
             )}
 
-            {/* File Upload */}
-            <DropZone onFileSelect={handleFileSelect} />
+            {/* File Upload or Pending File(s) */}
+            {pendingFiles && pendingFiles.length > 0 ? (
+              <Card className="border-2 border-dashed border-green-300 bg-green-50 dark:bg-green-900/20">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <Files className="h-10 w-10 text-green-600" />
+                      <div>
+                        <p className="font-medium">{pendingFiles.length} files ready</p>
+                        <p className="text-sm text-muted-foreground">
+                          {pendingFiles.map(f => f.name).join(', ')}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setPendingFiles(null)}
+                      >
+                        Remove All
+                      </Button>
+                      <Button
+                        onClick={processPendingFiles}
+                        className="gap-2"
+                      >
+                        <Zap className="h-4 w-4" />
+                        Convert All
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : pendingFile ? (
+              <Card className="border-2 border-dashed border-green-300 bg-green-50 dark:bg-green-900/20">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <FileSpreadsheet className="h-10 w-10 text-green-600" />
+                      <div>
+                        <p className="font-medium">{pendingFile.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {(pendingFile.size / 1024 / 1024).toFixed(2)} MB - Ready to convert
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => setPendingFile(null)}
+                      >
+                        Remove
+                      </Button>
+                      <Button
+                        onClick={processPendingFile}
+                        className="gap-2"
+                      >
+                        <Zap className="h-4 w-4" />
+                        Convert Now
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              <DropZone
+                onFileSelect={handleFileSelect}
+                allowMultiple={isPro}
+                onMultipleFilesSelect={handleMultipleFilesSelect}
+              />
+            )}
 
             {/* Selected template info */}
             {selectedTemplate !== 'generic' && templatesData && (
@@ -392,14 +862,46 @@ export default function Convert() {
                 </span> template for optimized extraction
               </div>
             )}
+
+          </div>
+        )}
+
+        {/* Analysis Dialog - Show after document analysis */}
+        {analysisResult && !extractedTables && (
+          <div className="max-w-3xl mx-auto">
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-xl font-semibold">Document Analysis Complete</h2>
+              <Button variant="ghost" size="sm" onClick={handleReset}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Start Over
+              </Button>
+            </div>
+            {analysisResult.analysis ? (
+              <AnalysisDialog
+                analysis={analysisResult}
+                fileName={fileName}
+                onExtract={handleGuidedExtract}
+                onQuickExtract={handleQuickExtract}
+                isExtracting={isExtracting}
+              />
+            ) : (
+              <Card className="p-6 text-center">
+                <p className="text-muted-foreground mb-4">
+                  Analysis completed but data structure was unexpected. Proceeding with quick extraction...
+                </p>
+                <Button onClick={handleQuickExtract} disabled={isExtracting}>
+                  {isExtracting ? 'Extracting...' : 'Quick Extract'}
+                </Button>
+              </Card>
+            )}
           </div>
         )}
 
         {/* Processing Status */}
         {processingStep && processingStep !== 'ready' && (
           <div className="max-w-md mx-auto">
-            <ProcessingStatus 
-              currentStep={processingStep} 
+            <ProcessingStatus
+              currentStep={processingStep}
               error={error || undefined}
               pageCount={pageCount}
             />
@@ -463,7 +965,7 @@ export default function Convert() {
             />
 
             {/* Info Messages (fallback extraction) */}
-            {warnings.some(w => w.message.includes('No tables detected')) && (
+            {warnings && warnings.length > 0 && warnings.some(w => w.message?.includes('No tables detected')) && (
               <Card className="border-blue-200 bg-blue-50 dark:bg-blue-900/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2 text-blue-700 dark:text-blue-400">
@@ -480,7 +982,7 @@ export default function Convert() {
             )}
 
             {/* Warnings (excluding info messages) */}
-            {warnings.filter(w => !w.message.includes('No tables detected')).length > 0 && (
+            {warnings && warnings.filter(w => !w.message?.includes('No tables detected')).length > 0 && (
               <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-900/20">
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
@@ -490,7 +992,7 @@ export default function Convert() {
                 </CardHeader>
                 <CardContent>
                   <ul className="space-y-2">
-                    {warnings.filter(w => !w.message.includes('No tables detected')).map((warning, index) => (
+                    {warnings.filter(w => !w.message?.includes('No tables detected')).map((warning, index) => (
                       <li key={index} className="text-sm">
                         <span className="font-medium">{warning.message}</span>
                         {warning.suggestion && (
@@ -525,11 +1027,11 @@ export default function Convert() {
                           <CardTitle className="text-lg">{table.sheetName}</CardTitle>
                           <div className="flex items-center gap-2">
                             <Badge variant="outline">Page {table.pageNumber}</Badge>
-                            <Badge 
-                              variant={table.confidence >= 0.9 ? 'default' : 'secondary'}
+                            <Badge
+                              variant={getConfidenceValue(table.confidence) >= 0.9 ? 'default' : 'secondary'}
                               className="font-normal"
                             >
-                              {Math.round(table.confidence * 100)}%
+                              {Math.round(getConfidenceValue(table.confidence) * 100)}%
                             </Badge>
                           </div>
                         </div>
@@ -619,7 +1121,7 @@ export default function Convert() {
                       </div>
                     </div>
                     <Button variant="secondary" onClick={() => setLocation('/pricing')}>
-                      Upgrade to Pro — $9/mo
+                      Upgrade to Pro — $29/mo
                     </Button>
                   </div>
                 </CardContent>
@@ -642,6 +1144,21 @@ export default function Convert() {
               </Button>
             </CardContent>
           </Card>
+        )}
+
+        {/* Debug: Unexpected state fallback */}
+        {!processingStep && !extractedTables && !analysisResult && !pendingFile && !pendingFiles && processedFiles.length === 0 && (
+          <div className="max-w-md mx-auto text-center p-8">
+            <p className="text-muted-foreground mb-4">
+              Ready to convert your documents. Select a template and upload a file above.
+            </p>
+            {isAnalyzing && (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span>Analyzing document...</span>
+              </div>
+            )}
+          </div>
         )}
       </main>
     </div>

@@ -24,7 +24,7 @@ import {
   getTemplateBySlug,
   seedTemplates,
 } from "./db";
-import { extractTablesFromPDF, extractTablesFromMultiplePages } from "./lib/openrouter";
+import { extractTablesFromPDF, extractTablesFromMultiplePages, analyzeDocument, extractWithGuidance, type UserGuidance } from "./lib/ai-extractor";
 import { getTemplate, getAllTemplates as getServerTemplates, EXTRACTION_TEMPLATES } from "./lib/templates";
 import { validateImageBase64, convertPdfToImages } from "./lib/pdfToImage";
 import { tablesToExcel, spreadsheetDataToExcel } from "./lib/excel";
@@ -48,6 +48,12 @@ export const appRouter = router({
   user: router({
     getProfile: protectedProcedure.query(async ({ ctx }) => {
       const user = await getUserById(ctx.user.id);
+      if (!user) return null;
+
+      // In testing mode, override subscription status to 'pro'
+      if (TESTING_MODE) {
+        return { ...user, subscriptionStatus: 'pro' as const };
+      }
       return user;
     }),
 
@@ -56,14 +62,17 @@ export const appRouter = router({
       if (!user) return null;
 
       const usageCheck = await checkUserUsageLimit(ctx.user.id);
-      
+
+      // In testing mode, show as Pro user with unlimited conversions
+      const isPro = TESTING_MODE || user.subscriptionStatus === 'pro';
+
       return {
         conversionsToday: user.conversionsToday,
         conversionsThisMonth: user.conversionsThisMonth,
         totalConversions: user.totalConversions,
-        subscriptionStatus: user.subscriptionStatus,
-        remaining: usageCheck.remaining,
-        dailyLimit: user.subscriptionStatus === 'pro' ? -1 : 3,
+        subscriptionStatus: isPro ? 'pro' : user.subscriptionStatus,
+        remaining: isPro ? -1 : usageCheck.remaining,
+        dailyLimit: isPro ? -1 : 3,
       };
     }),
   }),
@@ -139,6 +148,317 @@ export const appRouter = router({
         userIsPro: isPro,
       };
     }),
+
+    // Analyze document and generate questions (NEW - Intelligent Flow)
+    analyze: publicProcedure
+      .input(z.object({
+        fileBase64: z.string(),
+        fileName: z.string(),
+        mimeType: z.string().default('image/png'),
+      }))
+      .mutation(async ({ input }) => {
+        try {
+          // For PDFs, convert SAMPLE pages for comprehensive analysis
+          let imageBase64: string | string[] = input.fileBase64;
+          let imageMimeType = input.mimeType;
+          let pageNumbers: number[] = [1];
+
+          if (input.mimeType === 'application/pdf') {
+            // First, get total page count
+            const pdfConversion = await convertPdfToImages(input.fileBase64, 1);
+            if (!pdfConversion.success || pdfConversion.pages.length === 0) {
+              return {
+                success: false,
+                error: 'Failed to analyze PDF. Please try uploading an image instead.',
+              };
+            }
+
+            const totalPages = pdfConversion.totalPages;
+
+            // Calculate sample pages to analyze
+            // For 11-page document: pages 1, 3, 6, 9, 11
+            const samplePageNumbers: number[] = [1]; // Always include page 1
+
+            if (totalPages >= 3) {
+              // Add middle page
+              const middlePage = Math.ceil(totalPages / 2);
+              if (!samplePageNumbers.includes(middlePage)) {
+                samplePageNumbers.push(middlePage);
+              }
+            }
+
+            if (totalPages >= 5) {
+              // Add last page
+              if (!samplePageNumbers.includes(totalPages)) {
+                samplePageNumbers.push(totalPages);
+              }
+            }
+
+            if (totalPages >= 10) {
+              // For 10+ pages, also add 25% and 75% positions
+              const quarterPage = Math.ceil(totalPages * 0.25);
+              const threeQuarterPage = Math.ceil(totalPages * 0.75);
+              if (!samplePageNumbers.includes(quarterPage)) {
+                samplePageNumbers.push(quarterPage);
+              }
+              if (!samplePageNumbers.includes(threeQuarterPage)) {
+                samplePageNumbers.push(threeQuarterPage);
+              }
+            }
+
+            // Sort page numbers
+            samplePageNumbers.sort((a, b) => a - b);
+
+            // Limit to max 5 sample pages
+            const pagesToAnalyze = samplePageNumbers.slice(0, 5);
+
+            console.log(`PDF has ${totalPages} pages, sampling pages: ${pagesToAnalyze.join(', ')}`);
+
+            // Convert the sample pages
+            const maxPageToConvert = Math.max(...pagesToAnalyze);
+            const fullConversion = await convertPdfToImages(input.fileBase64, maxPageToConvert);
+
+            if (!fullConversion.success) {
+              return {
+                success: false,
+                error: 'Failed to convert PDF pages for analysis.',
+              };
+            }
+
+            // Extract the sample pages we need
+            const sampleImages: string[] = [];
+            for (const pageNum of pagesToAnalyze) {
+              const page = fullConversion.pages.find(p => p.pageNumber === pageNum);
+              if (page) {
+                sampleImages.push(page.base64);
+              }
+            }
+
+            if (sampleImages.length === 0) {
+              return {
+                success: false,
+                error: 'Failed to extract sample pages for analysis.',
+              };
+            }
+
+            imageBase64 = sampleImages.length === 1 ? sampleImages[0] : sampleImages;
+            imageMimeType = 'image/png';
+            pageNumbers = pagesToAnalyze;
+          }
+
+          console.log('Calling analyzeDocument for:', input.fileName);
+          const analysis = await analyzeDocument(imageBase64, input.fileName, imageMimeType, pageNumbers);
+          console.log('Analysis result:', JSON.stringify(analysis, null, 2).substring(0, 500));
+          return {
+            success: true,
+            analysis,
+          };
+        } catch (error: any) {
+          console.error('Analysis error:', error);
+          return {
+            success: false,
+            error: error.message || 'Failed to analyze document',
+          };
+        }
+      }),
+
+    // Extract with user guidance (NEW - Intelligent Flow)
+    extractWithGuidance: publicProcedure
+      .input(z.object({
+        fileBase64: z.string(),
+        fileName: z.string(),
+        fileSize: z.number(),
+        mimeType: z.string().default('image/png'),
+        anonymousId: z.string().optional(),
+        guidance: z.object({
+          answers: z.record(z.string(), z.unknown()),
+          acceptedSuggestions: z.array(z.string()),
+          freeformInstructions: z.string().optional(),
+          outputPreferences: z.object({
+            combineRelatedTables: z.boolean(),
+            outputLanguage: z.enum(['auto', 'english', 'swedish', 'german', 'spanish', 'french']),
+            skipDiagrams: z.boolean(),
+            skipImages: z.boolean(),
+            symbolMapping: z.record(z.string(), z.string()).optional(),
+          }).optional(),
+        }),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const ip = ctx.req.headers['x-forwarded-for'] as string || ctx.req.socket?.remoteAddress || '127.0.0.1';
+
+        // Check usage limits (skip in testing mode)
+        if (!TESTING_MODE) {
+          let usageCheck;
+          if (ctx.user) {
+            usageCheck = await checkUserUsageLimit(ctx.user.id);
+          } else {
+            usageCheck = await checkAnonymousUsageLimit(ip);
+          }
+
+          if (!usageCheck.allowed) {
+            return {
+              success: false,
+              error: usageCheck.message,
+              errorCode: 'USAGE_LIMIT_EXCEEDED',
+            };
+          }
+        }
+
+        // Create conversion record
+        const conversion = await createConversion({
+          userId: ctx.user?.id || null,
+          anonymousId: input.anonymousId || null,
+          ipAddress: ip,
+          originalFilename: input.fileName,
+          fileSizeBytes: input.fileSize,
+          status: 'processing',
+        });
+
+        if (!conversion) {
+          return {
+            success: false,
+            error: 'Failed to create conversion record',
+            errorCode: 'DB_ERROR',
+          };
+        }
+
+        try {
+          // Handle PDF files by converting to images first
+          if (input.mimeType === 'application/pdf') {
+            const pdfConversion = await convertPdfToImages(input.fileBase64, 10);
+
+            if (!pdfConversion.success || pdfConversion.pages.length === 0) {
+              await updateConversion(conversion.id, {
+                status: 'failed',
+                errorCode: 'PDF_CONVERSION_FAILED',
+                errorMessage: pdfConversion.error || 'Failed to convert PDF',
+              });
+              return {
+                success: false,
+                conversionId: conversion.id,
+                error: pdfConversion.error || 'Failed to convert PDF',
+                errorCode: 'PDF_CONVERSION_FAILED',
+              };
+            }
+
+            // For multi-page PDFs, extract each page with guidance
+            const allTables: any[] = [];
+            const allWarnings: any[] = [];
+            let totalConfidence = 0;
+
+            for (let i = 0; i < pdfConversion.pages.length; i++) {
+              const page = pdfConversion.pages[i];
+              const result = await extractWithGuidance(
+                page.base64,
+                `${input.fileName} (Page ${page.pageNumber})`,
+                'image/png',
+                input.guidance as UserGuidance
+              );
+
+              if (result.success) {
+                const tablesWithPageNum = result.tables.map(table => ({
+                  ...table,
+                  pageNumber: page.pageNumber,
+                  sheetName: pdfConversion.pages.length > 1
+                    ? `${table.sheetName.substring(0, 20)} (P${page.pageNumber})`
+                    : table.sheetName,
+                }));
+                allTables.push(...tablesWithPageNum);
+                allWarnings.push(...result.warnings);
+                totalConfidence += result.confidence;
+              }
+            }
+
+            const avgConfidence = pdfConversion.pages.length > 0 ? totalConfidence / pdfConversion.pages.length : 0;
+
+            await updateConversion(conversion.id, {
+              status: 'review',
+              extractedTables: allTables,
+              tableCount: allTables.length,
+              rowCount: allTables.reduce((sum, t) => sum + t.rows.length, 0),
+              aiConfidenceScore: String(avgConfidence),
+              aiWarnings: allWarnings,
+              pageCount: pdfConversion.totalPages,
+            });
+
+            if (ctx.user) {
+              await incrementUserUsage(ctx.user.id);
+            } else {
+              await incrementAnonymousUsage(ip);
+            }
+
+            return {
+              success: true,
+              conversionId: conversion.id,
+              tables: allTables,
+              warnings: allWarnings,
+              confidence: avgConfidence,
+              pageCount: pdfConversion.totalPages,
+            };
+          }
+
+          // For non-PDF files (images)
+          const result = await extractWithGuidance(
+            input.fileBase64,
+            input.fileName,
+            input.mimeType,
+            input.guidance as UserGuidance
+          );
+
+          if (!result.success) {
+            await updateConversion(conversion.id, {
+              status: 'failed',
+              errorCode: result.errorCode,
+              errorMessage: result.error,
+            });
+
+            return {
+              success: false,
+              conversionId: conversion.id,
+              error: result.error,
+              errorCode: result.errorCode,
+            };
+          }
+
+          await updateConversion(conversion.id, {
+            status: 'review',
+            extractedTables: result.tables,
+            tableCount: result.tables.length,
+            rowCount: result.tables.reduce((sum, t) => sum + t.rows.length, 0),
+            aiConfidenceScore: String(result.confidence),
+            aiWarnings: result.warnings,
+          });
+
+          if (ctx.user) {
+            await incrementUserUsage(ctx.user.id);
+          } else {
+            await incrementAnonymousUsage(ip);
+          }
+
+          return {
+            success: true,
+            conversionId: conversion.id,
+            tables: result.tables,
+            warnings: result.warnings,
+            confidence: result.confidence,
+            appliedGuidance: result.appliedGuidance,
+          };
+        } catch (error) {
+          console.error('Guided extraction error:', error);
+          await updateConversion(conversion.id, {
+            status: 'failed',
+            errorCode: 'INTERNAL_ERROR',
+            errorMessage: 'An unexpected error occurred',
+          });
+
+          return {
+            success: false,
+            conversionId: conversion.id,
+            error: 'An unexpected error occurred. Please try again.',
+            errorCode: 'INTERNAL_ERROR',
+          };
+        }
+      }),
 
     // Process PDF and extract tables
     process: publicProcedure

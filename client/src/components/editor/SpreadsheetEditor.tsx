@@ -10,12 +10,30 @@ import { Button } from '@/components/ui/button';
 import { Download, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
+// ConfidenceBreakdown type for detailed confidence info
+interface ConfidenceBreakdown {
+  overall: number;
+  breakdown: {
+    textClarity: number;
+    structureClarity: number;
+    specialChars: number;
+    completeness: number;
+  };
+  uncertainCells: Array<{
+    row: number;
+    col: number;
+    value: string;
+    confidence: number;
+    reason: string;
+  }>;
+}
+
 export interface ExtractedTable {
   sheetName: string;
   headers: string[];
   rows: (string | null)[][];
   pageNumber: number;
-  confidence: number;
+  confidence: number | ConfidenceBreakdown;
 }
 
 interface SpreadsheetEditorProps {
@@ -159,7 +177,10 @@ async function exportToExcel(sheets: SheetData[], filename: string = "converted_
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  saveAs(new Blob([buffer]), filename);
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  saveAs(blob, filename);
 }
 
 /**
@@ -237,7 +258,11 @@ export default function SpreadsheetEditor({ tables, filename, onExport }: Spread
 
   const handleExport = useCallback(async () => {
     try {
-      const exportFilename = filename.replace(/\.(pdf|png|jpg|jpeg)$/i, '.xlsx');
+      // Ensure filename ends with .xlsx
+      let exportFilename = filename.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, '');
+      if (!exportFilename.endsWith('.xlsx')) {
+        exportFilename += '.xlsx';
+      }
       await exportToExcel(data, exportFilename);
       toast.success('Excel file downloaded successfully!');
       if (onExport) {

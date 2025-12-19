@@ -221,7 +221,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <Button variant="secondary" onClick={() => setLocation('/pricing')}>
-                    Upgrade — $9/mo
+                    Upgrade — $29/mo
                   </Button>
                 </div>
               </CardContent>

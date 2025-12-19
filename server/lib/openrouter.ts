@@ -1,4 +1,10 @@
+// Support both Google AI Studio (free) and OpenRouter as fallback
+const GOOGLE_AI_API_KEY = process.env.GOOGLE_AI_API_KEY || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+
+// Use Google AI Studio if key is available, otherwise fall back to OpenRouter
+const USE_GOOGLE_AI = !!GOOGLE_AI_API_KEY;
+const GOOGLE_AI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
 
 /**
@@ -209,36 +215,17 @@ WARNING TYPES:
 - mixed_languages: Multiple languages detected
 - inconsistent_format: Dates, numbers, or currencies in inconsistent formats`;
 
-const FALLBACK_PROMPT = `You are a precise data extraction AI. The document contains NO traditional tables, but may have structured data that should be extracted.
+const FALLBACK_PROMPT = `You are a document OCR and data extraction assistant. Your task is to convert document images into structured data.
 
-TASK: Analyze this document, determine what type it is, and extract ALL relevant structured information as a two-column table (Field | Value).
+Extract all visible text from this document image and organize it as key-value pairs.
 
-YOU DECIDE:
-- What type of document this is
-- What fields are relevant to extract
-- How to label the fields appropriately
-- How to structure the data logically
+For any document type, identify and extract:
+- All text labels and their corresponding values
+- Any dates, numbers, codes, or reference numbers
+- Names of people, organizations, or places
+- Any other structured information visible
 
-EXTRACTION GUIDELINES:
-1. First, identify the document type (ID, contract, letter, certificate, form, receipt, invoice, report, etc.)
-2. Extract ALL meaningful data points you can find
-3. Use clear, descriptive field names in English
-4. Preserve original values exactly (dates, numbers, names, codes, special characters)
-5. For multi-line content (addresses, paragraphs), combine sensibly or split into logical parts
-6. Group related fields together (e.g., all dates together, all personal info together)
-7. Include metadata if visible (document date, reference numbers, page numbers)
-8. For machine-readable codes (MRZ, barcodes, QR content), parse into human-readable fields
-
-EXAMPLES OF WHAT TO EXTRACT:
-- IDs/Passports: name, number, dates, nationality, issuing authority
-- Contracts: parties, dates, terms, signatures, reference numbers
-- Letters: sender, recipient, date, subject, key points
-- Certificates: recipient, issuer, date, title, validity
-- Forms: all filled fields and their values
-- Receipts: vendor, date, items, totals, payment method
-- Any document: dates, names, numbers, codes, addresses, key text
-
-OUTPUT FORMAT:
+Return ONLY valid JSON in this exact format:
 {
   "tables": [
     {
@@ -246,23 +233,151 @@ OUTPUT FORMAT:
       "pageNumber": 1,
       "headers": ["Field", "Value"],
       "rows": [
-        ["Document Type", "<what you identified>"],
-        ["<relevant field 1>", "<value>"],
-        ["<relevant field 2>", "<value>"]
+        ["Document Type", "the type you identified"],
+        ["Field Name", "extracted value"]
       ],
-      "confidence": 0.90
+      "confidence": 0.85
     }
   ],
   "warnings": [],
-  "overallConfidence": 0.90
+  "overallConfidence": 0.85
 }
 
-IMPORTANT:
-- Be thorough - extract everything that could be useful
-- Be smart about field naming - use what makes sense for THIS document
-- If multiple pages have different content, note which page data came from
-- If you're unsure about a value, extract it anyway with your best interpretation
-- The first row should always identify the Document Type you detected`;
+Important: Respond with ONLY the JSON object, no other text or explanations.`;
+
+/**
+ * Call Google AI Studio (Gemini) API directly
+ */
+async function callGoogleAI(
+  base64Image: string,
+  mimeType: string,
+  systemPrompt: string,
+  userPrompt: string,
+  timeoutMs: number = 60000
+): Promise<{ success: boolean; content?: string; error?: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    // Google AI uses a different format - gemini-2.0-flash for vision
+    const response = await fetch(
+      `${GOOGLE_AI_BASE_URL}/models/gemini-2.0-flash:generateContent?key=${GOOGLE_AI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: `${systemPrompt}\n\n${userPrompt}` },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: base64Image,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 8192,
+          },
+        }),
+      }
+    );
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Google AI API error:', errorText);
+      return { success: false, error: errorText };
+    }
+
+    const result = await response.json();
+    const content = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!content) {
+      return { success: false, error: 'No response from Google AI' };
+    }
+
+    return { success: true, content };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timed out' };
+    }
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Call OpenRouter API (fallback)
+ */
+async function callOpenRouter(
+  dataUrl: string,
+  systemPrompt: string,
+  userPrompt: string,
+  timeoutMs: number = 60000
+): Promise<{ success: boolean; content?: string; error?: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://smartpdf-convert.com',
+        'X-Title': 'SmartPDF Convert',
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: 'google/gemini-2.0-flash-001',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: userPrompt },
+              { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
+            ],
+          },
+        ],
+        max_tokens: 4096,
+        temperature: 0.1,
+      }),
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('OpenRouter API error:', errorText);
+      return { success: false, error: errorText };
+    }
+
+    const result = await response.json();
+    const content = result.choices?.[0]?.message?.content;
+
+    if (!content) {
+      return { success: false, error: 'No response from OpenRouter' };
+    }
+
+    return { success: true, content };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      return { success: false, error: 'Request timed out' };
+    }
+    return { success: false, error: error.message };
+  }
+}
 
 /**
  * Extract tables from multiple pages and combine results
@@ -282,7 +397,7 @@ export async function extractTablesFromMultiplePages(
   for (let i = 0; i < pages.length; i++) {
     const page = pages[i];
     console.log(`Processing page ${page.pageNumber} of ${pages.length}...`);
-    
+
     if (onProgress) {
       onProgress(i + 1, pages.length);
     }
@@ -321,15 +436,15 @@ export async function extractTablesFromMultiplePages(
           sheetName,
         };
       });
-      
+
       allTables.push(...tablesWithPageNum);
-      
+
       // Update page numbers in warnings
       const warningsWithPageNum = result.warnings.map(warning => ({
         ...warning,
         pageNumber: page.pageNumber,
       }));
-      
+
       allWarnings.push(...warningsWithPageNum);
       totalConfidence += result.confidence;
       successfulPages++;
@@ -373,14 +488,15 @@ export async function extractTablesFromPDF(
 ): Promise<ExtractionResult> {
   const startTime = Date.now();
 
-  if (!OPENROUTER_API_KEY) {
+  // Check if we have any API key configured
+  if (!GOOGLE_AI_API_KEY && !OPENROUTER_API_KEY) {
     return {
       success: false,
       tables: [],
       warnings: [],
       confidence: 0,
       processingTime: Date.now() - startTime,
-      error: 'OpenRouter API key not configured',
+      error: 'No AI API key configured. Please set GOOGLE_AI_API_KEY or OPENROUTER_API_KEY.',
       errorCode: 'CONFIG_ERROR',
     };
   }
@@ -391,74 +507,62 @@ export async function extractTablesFromPDF(
     if (fileBase64.includes(',')) {
       cleanBase64 = fileBase64.split(',')[1];
     }
-    
+
     // Remove any whitespace or newlines from base64
     cleanBase64 = cleanBase64.replace(/\s/g, '');
 
     // For PDF files, we need to send as image/png or convert
-    // OpenRouter/GPT-4V expects image formats, not PDF
-    // We'll use image/png as the mime type for the data URL
     const imageMimeType = mimeType === 'application/pdf' ? 'image/png' : mimeType;
-    
-    // Create proper data URL format
+
+    // Create proper data URL format (for OpenRouter fallback)
     const dataUrl = `data:${imageMimeType};base64,${cleanBase64}`;
 
-    console.log(`Processing file: ${fileName}, mime: ${mimeType}, base64 length: ${cleanBase64.length}`);
+    console.log(`Processing file: ${fileName}, mime: ${mimeType}, using: ${USE_GOOGLE_AI ? 'Google AI Studio' : 'OpenRouter'}`);
 
-    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://smartpdf-convert.com',
-        'X-Title': 'SmartPDF Convert',
-      },
-      body: JSON.stringify({
-        model: 'openai/gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: customSystemPrompt || SYSTEM_PROMPT,
-          },
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: `Extract all tables from this document: "${fileName}". Return valid JSON only, no markdown code blocks.`,
-              },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: dataUrl,
-                  detail: 'high',
-                },
-              },
-            ],
-          },
-        ],
-        max_tokens: 4096,
-        temperature: 0.1,
-      }),
-    });
+    const systemPrompt = customSystemPrompt || SYSTEM_PROMPT;
+    const userPrompt = `Extract all tables from this document: "${fileName}". Return valid JSON only, no markdown code blocks.`;
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenRouter API error:', errorText);
-      
+    // Try Google AI first if available, otherwise use OpenRouter
+    let result;
+    if (USE_GOOGLE_AI) {
+      console.log('Using Google AI Studio (free)...');
+      result = await callGoogleAI(cleanBase64, imageMimeType, systemPrompt, userPrompt);
+
+      // If Google AI fails, try OpenRouter as fallback
+      if (!result.success && OPENROUTER_API_KEY) {
+        console.log('Google AI failed, falling back to OpenRouter...');
+        result = await callOpenRouter(dataUrl, systemPrompt, userPrompt);
+      }
+    } else {
+      result = await callOpenRouter(dataUrl, systemPrompt, userPrompt);
+    }
+
+    if (!result.success) {
       // Check for specific error types
-      if (errorText.includes('Invalid image URL')) {
+      if (result.error?.includes('Invalid image') || result.error?.includes('image')) {
         return {
           success: false,
           tables: [],
           warnings: [],
           confidence: 0,
           processingTime: Date.now() - startTime,
-          error: 'Unable to process this PDF. Please try converting it to an image (PNG/JPG) first, or use a different PDF.',
+          error: 'Unable to process this PDF. Please try converting it to an image (PNG/JPG) first.',
           errorCode: 'INVALID_IMAGE_FORMAT',
         };
       }
-      
+
+      if (result.error?.includes('timed out')) {
+        return {
+          success: false,
+          tables: [],
+          warnings: [],
+          confidence: 0,
+          processingTime: Date.now() - startTime,
+          error: 'Processing timed out. The document may be too complex.',
+          errorCode: 'AI_TIMEOUT',
+        };
+      }
+
       return {
         success: false,
         tables: [],
@@ -470,28 +574,13 @@ export async function extractTablesFromPDF(
       };
     }
 
-    const result = await response.json();
-    const content = result.choices?.[0]?.message?.content;
-
-    if (!content) {
-      return {
-        success: false,
-        tables: [],
-        warnings: [],
-        confidence: 0,
-        processingTime: Date.now() - startTime,
-        error: 'No response from AI',
-        errorCode: 'AI_NO_RESPONSE',
-      };
-    }
-
     // Parse JSON from response (handle potential markdown code blocks)
     let parsed;
     try {
-      const cleanContent = content.replace(/```json\n?|\n?```/g, '').trim();
+      const cleanContent = result.content!.replace(/```json\n?|\n?```/g, '').trim();
       parsed = JSON.parse(cleanContent);
     } catch (parseError) {
-      console.error('Failed to parse AI response:', content);
+      console.error('Failed to parse AI response:', result.content);
       return {
         success: false,
         tables: [],
@@ -510,57 +599,36 @@ export async function extractTablesFromPDF(
     if (processedTables.length === 0) {
       console.log('No tables found, attempting intelligent key-value extraction...');
 
-      const fallbackResponse = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://smartpdf-convert.com',
-          'X-Title': 'SmartPDF Convert',
-        },
-        body: JSON.stringify({
-          model: 'openai/gpt-4o',
-          messages: [
-            { role: 'system', content: FALLBACK_PROMPT },
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: `Analyze this document and extract all structured data: "${fileName}". Return valid JSON only.` },
-                { type: 'image_url', image_url: { url: dataUrl, detail: 'high' } },
-              ],
-            },
-          ],
-          max_tokens: 4096,
-          temperature: 0.1,
-        }),
-      });
+      const fallbackUserPrompt = `Extract all text and data from this document image as structured key-value pairs. File: "${fileName}". Return only JSON.`;
 
-      if (fallbackResponse.ok) {
-        const fallbackResult = await fallbackResponse.json();
-        const fallbackContent = fallbackResult.choices?.[0]?.message?.content;
+      let fallbackResult;
+      if (USE_GOOGLE_AI) {
+        fallbackResult = await callGoogleAI(cleanBase64, imageMimeType, FALLBACK_PROMPT, fallbackUserPrompt, 30000);
+      } else {
+        fallbackResult = await callOpenRouter(dataUrl, FALLBACK_PROMPT, fallbackUserPrompt, 30000);
+      }
 
-        if (fallbackContent) {
-          try {
-            const fallbackParsed = JSON.parse(fallbackContent.replace(/```json\n?|\n?```/g, '').trim());
+      if (fallbackResult.success && fallbackResult.content) {
+        try {
+          const fallbackParsed = JSON.parse(fallbackResult.content.replace(/```json\n?|\n?```/g, '').trim());
 
-            if (fallbackParsed.tables && fallbackParsed.tables.length > 0) {
-              const fallbackWarning: AIWarning = {
-                type: 'inconsistent_format',
-                message: 'No tables detected - extracted as structured key-value data',
-                suggestion: 'The AI analyzed this document and extracted all relevant data as Field/Value pairs.',
-              };
+          if (fallbackParsed.tables && fallbackParsed.tables.length > 0) {
+            const fallbackWarning: AIWarning = {
+              type: 'inconsistent_format',
+              message: 'No tables detected - extracted as structured key-value data',
+              suggestion: 'The AI analyzed this document and extracted all relevant data as Field/Value pairs.',
+            };
 
-              return {
-                success: true,
-                tables: fallbackParsed.tables,
-                warnings: [...(fallbackParsed.warnings || []), fallbackWarning],
-                confidence: fallbackParsed.overallConfidence || 0.85,
-                processingTime: Date.now() - startTime,
-              };
-            }
-          } catch (e) {
-            console.error('Fallback parsing failed:', e);
+            return {
+              success: true,
+              tables: fallbackParsed.tables,
+              warnings: [...(fallbackParsed.warnings || []), fallbackWarning],
+              confidence: fallbackParsed.overallConfidence || 0.85,
+              processingTime: Date.now() - startTime,
+            };
           }
+        } catch (e) {
+          console.error('Fallback parsing failed:', e);
         }
       }
     }
@@ -572,8 +640,22 @@ export async function extractTablesFromPDF(
       confidence: parsed.overallConfidence || 0.9,
       processingTime: Date.now() - startTime,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('AI extraction error:', error);
+
+    // Check if it's a timeout error
+    if (error.name === 'AbortError') {
+      return {
+        success: false,
+        tables: [],
+        warnings: [],
+        confidence: 0,
+        processingTime: Date.now() - startTime,
+        error: 'Processing timed out. The document may be too complex. Try uploading a simpler image or fewer pages.',
+        errorCode: 'AI_TIMEOUT',
+      };
+    }
+
     return {
       success: false,
       tables: [],

@@ -111,6 +111,10 @@ export default function Home() {
   const { isAuthenticated } = useSupabaseAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Get Pro status for multi-file feature
+  const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
+  const isPro = templatesData?.userIsPro ?? false;
+
   // Set SEO title for the homepage
   useEffect(() => {
     document.title = 'Invoice to Excel - AI Data Extraction | SmartPDF Convert';
@@ -124,6 +128,20 @@ export default function Home() {
       base64,
     }));
     setLocation('/convert');
+  };
+
+  const handleMultipleFilesSelect = (files: Array<{ file: File; base64: string }>) => {
+    // Store multiple files in sessionStorage and redirect to convert page
+    sessionStorage.setItem('pendingFiles', JSON.stringify(
+      files.map(({ file, base64 }) => ({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        base64,
+      }))
+    ));
+    setLocation('/convert');
+    toast.success(`${files.length} files ready for batch processing`);
   };
 
   return (
@@ -213,7 +231,11 @@ export default function Home() {
               </p>
 
               <div className="pt-8 max-w-lg mx-auto space-y-4">
-                <DropZone onFileSelect={handleFileSelect} />
+                <DropZone
+                  onFileSelect={handleFileSelect}
+                  allowMultiple={isPro}
+                  onMultipleFilesSelect={handleMultipleFilesSelect}
+                />
                 <PdfHelper />
               </div>
 
