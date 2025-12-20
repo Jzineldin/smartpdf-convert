@@ -10,6 +10,7 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Convert from "./pages/Convert";
+import Results from "./pages/Results";
 import Dashboard from "./pages/Dashboard";
 import Pricing from "./pages/Pricing";
 import Success from "./pages/Success";
@@ -24,6 +25,7 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/signup" component={Signup} />
       <Route path="/convert" component={Convert} />
+      <Route path="/results/:id" component={Results} />
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/pricing" component={Pricing} />
       <Route path="/success" component={Success} />

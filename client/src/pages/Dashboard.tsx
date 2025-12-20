@@ -18,6 +18,9 @@ import {
   Settings,
   LogOut,
   Crown,
+  Eye,
+  XCircle,
+  Loader2,
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
@@ -260,10 +263,23 @@ export default function Dashboard() {
                   {conversions.map((conversion) => (
                     <div
                       key={conversion.id}
-                      className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors"
+                      className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                      onClick={() => setLocation(`/results/${conversion.id}`)}
                     >
-                      <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded flex items-center justify-center">
-                        <FileText className="h-5 w-5 text-blue-600" />
+                      <div className={`w-10 h-10 rounded flex items-center justify-center ${
+                        conversion.status === 'completed'
+                          ? 'bg-blue-100 dark:bg-blue-900/30'
+                          : conversion.status === 'failed'
+                          ? 'bg-red-100 dark:bg-red-900/30'
+                          : 'bg-yellow-100 dark:bg-yellow-900/30'
+                      }`}>
+                        {conversion.status === 'processing' ? (
+                          <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
+                        ) : conversion.status === 'failed' ? (
+                          <XCircle className="h-5 w-5 text-red-600" />
+                        ) : (
+                          <FileText className="h-5 w-5 text-blue-600" />
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">{conversion.originalFilename}</p>
@@ -286,15 +302,33 @@ export default function Dashboard() {
                       >
                         {conversion.status}
                       </Badge>
-                      {conversion.xlsxStoragePath && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => window.open(conversion.xlsxStoragePath!, '_blank')}
-                        >
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {conversion.status === 'completed' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setLocation(`/results/${conversion.id}`);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-1" />
+                            View
+                          </Button>
+                        )}
+                        {conversion.xlsxStoragePath && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.open(conversion.xlsxStoragePath!, '_blank');
+                            }}
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

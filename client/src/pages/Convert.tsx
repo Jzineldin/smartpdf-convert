@@ -10,8 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files, Info, Loader2 } from 'lucide-react';
+import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files, Info, Loader2, Columns2, Maximize2, Minimize2 } from 'lucide-react';
+import { PreviewContainer } from '@/components/preview';
 import TemplateSelector from '@/components/templates/TemplateSelector';
+import { cn } from '@/lib/utils';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
 
@@ -124,7 +126,11 @@ export default function Convert() {
   const [warnings, setWarnings] = useState<AIWarning[]>([]);
   const [confidence, setConfidence] = useState<number>(0);
   const [conversionId, setConversionId] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview');
+  const [viewMode, setViewMode] = useState<'preview' | 'split' | 'edit'>('preview');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Store the original PDF file for split view
+  const [originalPdfBase64, setOriginalPdfBase64] = useState<string | null>(null);
   const [pageCount, setPageCount] = useState<number | undefined>(undefined);
   const [fileName, setFileName] = useState<string>('converted-tables');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('generic');
@@ -207,6 +213,14 @@ export default function Convert() {
       return;
     }
 
+    // Store PDF for split view preview (pending files are usually PDFs)
+    const isPdf = pendingFile.name.toLowerCase().endsWith('.pdf');
+    if (isPdf) {
+      setOriginalPdfBase64(pendingFile.base64);
+    } else {
+      setOriginalPdfBase64(null);
+    }
+
     setProcessingStep('upload');
 
     try {
@@ -260,6 +274,16 @@ export default function Convert() {
     // Clear previous batch
     setAccumulatedTables([]);
     setProcessedFiles([]);
+
+    // Store the first PDF for split view preview
+    const firstPdf = pendingFiles.find(f =>
+      f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf'
+    );
+    if (firstPdf) {
+      setOriginalPdfBase64(firstPdf.base64);
+    } else {
+      setOriginalPdfBase64(null);
+    }
 
     const allTables: TableWithSource[] = [];
     const allWarnings: AIWarning[] = [];
@@ -354,6 +378,16 @@ export default function Convert() {
     setAccumulatedTables([]);
     setProcessedFiles([]);
 
+    // Store the first PDF for split view preview
+    const firstPdf = files.find(f =>
+      f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf')
+    );
+    if (firstPdf) {
+      setOriginalPdfBase64(firstPdf.base64);
+    } else {
+      setOriginalPdfBase64(null);
+    }
+
     const allTables: TableWithSource[] = [];
     const allWarnings: AIWarning[] = [];
     let totalConfidence = 0;
@@ -444,6 +478,7 @@ export default function Convert() {
     }
 
     const mimeType = file.type || 'application/pdf';
+    const isPdfFile = mimeType === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
     // Store file data for later extraction
     setCurrentFileData({
@@ -452,6 +487,13 @@ export default function Convert() {
       name: file.name,
       size: file.size,
     });
+
+    // Store PDF for split view preview (only for PDF files)
+    if (isPdfFile) {
+      setOriginalPdfBase64(base64);
+    } else {
+      setOriginalPdfBase64(null);
+    }
 
     setProcessingStep('upload');
     setIsAnalyzing(true);
@@ -548,6 +590,14 @@ export default function Convert() {
       reader.readAsDataURL(blob);
       const base64 = await base64Promise;
 
+      // Store PDF for split view if sample is a PDF
+      const isPdf = sampleFileName.toLowerCase().endsWith('.pdf') || blob.type === 'application/pdf';
+      if (isPdf) {
+        setOriginalPdfBase64(base64);
+      } else {
+        setOriginalPdfBase64(null);
+      }
+
       setProcessingStep('analyze');
 
       const result = await processMutation.mutateAsync({
@@ -610,6 +660,8 @@ export default function Convert() {
     setCurrentFileData(null);
     setIsAnalyzing(false);
     setIsExtracting(false);
+    // Clear PDF for split view
+    setOriginalPdfBase64(null);
   };
 
   // Handler for guided extraction after analysis dialog
@@ -1006,12 +1058,19 @@ export default function Convert() {
             )}
 
             {/* View Mode Tabs */}
-            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'preview' | 'edit')}>
+            <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'preview' | 'split' | 'edit')}>
               <TabsList>
                 <TabsTrigger value="preview" className="gap-2">
                   <Eye className="h-4 w-4" />
                   Preview
                 </TabsTrigger>
+                {originalPdfBase64 && (
+                  <TabsTrigger value="split" className="gap-2">
+                    <Columns2 className="h-4 w-4" />
+                    <span className="hidden sm:inline">Split View</span>
+                    <span className="sm:hidden">Split</span>
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="edit" className="gap-2">
                   <Edit3 className="h-4 w-4" />
                   Edit & Export
@@ -1071,6 +1130,43 @@ export default function Convert() {
                       </CardContent>
                     </Card>
                   ))}
+                </div>
+              </TabsContent>
+
+              {/* Split View - PDF side by side with extracted data */}
+              <TabsContent value="split" className="mt-4">
+                <div className={cn(
+                  'relative rounded-lg border overflow-hidden transition-all',
+                  isFullscreen
+                    ? 'fixed inset-0 z-50 rounded-none'
+                    : 'h-[calc(100vh-280px)] min-h-[500px]'
+                )}>
+                  {/* Fullscreen toggle button */}
+                  <div className="absolute top-2 right-2 z-10">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setIsFullscreen(!isFullscreen)}
+                      className="gap-1 shadow-md"
+                    >
+                      {isFullscreen ? (
+                        <>
+                          <Minimize2 className="h-4 w-4" />
+                          <span className="hidden sm:inline">Exit Fullscreen</span>
+                        </>
+                      ) : (
+                        <>
+                          <Maximize2 className="h-4 w-4" />
+                          <span className="hidden sm:inline">Fullscreen</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <PreviewContainer
+                    pdfFile={originalPdfBase64}
+                    extractedSheets={extractedTables}
+                    defaultViewMode="split"
+                  />
                 </div>
               </TabsContent>
 
