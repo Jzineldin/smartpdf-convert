@@ -139,6 +139,7 @@ export default function Convert() {
   // Batch upload state (Pro feature)
   const [accumulatedTables, setAccumulatedTables] = useState<TableWithSource[]>([]);
   const [processedFiles, setProcessedFiles] = useState<string[]>([]);
+  const [currentBatchId, setCurrentBatchId] = useState<string | null>(null);
 
   // Pending file(s) from landing page
   const [pendingFile, setPendingFile] = useState<{ name: string; size: number; base64: string } | null>(null);
@@ -235,6 +236,13 @@ export default function Convert() {
       });
 
       if (result.success && result.tables) {
+        // Redirect to Results page for persistent viewing
+        if (result.conversionId) {
+          setLocation(`/results/${result.conversionId}`);
+          return;
+        }
+
+        // Fallback: show results inline if no conversion ID
         setProcessingStep('ready');
         setExtractedTables(result.tables);
         const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
@@ -275,6 +283,10 @@ export default function Convert() {
     setAccumulatedTables([]);
     setProcessedFiles([]);
 
+    // Generate a batch ID for grouping these uploads
+    const batchId = `batch-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    setCurrentBatchId(batchId);
+
     // Store the first PDF for split view preview
     const firstPdf = pendingFiles.find(f =>
       f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf'
@@ -306,6 +318,7 @@ export default function Convert() {
           fileSize: fileData.size,
           mimeType: fileData.type || 'application/pdf',
           templateId: selectedTemplate,
+          batchId: batchId,
         });
 
         if (result.success && result.tables) {
@@ -378,6 +391,10 @@ export default function Convert() {
     setAccumulatedTables([]);
     setProcessedFiles([]);
 
+    // Generate a batch ID for grouping these uploads
+    const batchId = `batch-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    setCurrentBatchId(batchId);
+
     // Store the first PDF for split view preview
     const firstPdf = files.find(f =>
       f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf')
@@ -409,6 +426,7 @@ export default function Convert() {
           fileSize: file.size,
           mimeType: file.type || 'application/pdf',
           templateId: selectedTemplate,
+          batchId: batchId,
         });
 
         if (result.success && result.tables) {
@@ -540,6 +558,14 @@ export default function Convert() {
           return;
         }
 
+        // Redirect to Results page for persistent viewing
+        if (result.conversionId) {
+          toast.success(`Extracted ${result.tables?.length || 0} table(s)!`);
+          setLocation(`/results/${result.conversionId}`);
+          return;
+        }
+
+        // Fallback: show results inline
         setProcessingStep('ready');
         setExtractedTables(result.tables || []);
         const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
@@ -652,6 +678,7 @@ export default function Convert() {
     // Clear batch state
     setAccumulatedTables([]);
     setProcessedFiles([]);
+    setCurrentBatchId(null);
     // Clear any pending files
     setPendingFile(null);
     setPendingFiles(null);
@@ -681,6 +708,14 @@ export default function Convert() {
       });
 
       if (result.success && result.tables) {
+        // Redirect to Results page for persistent viewing
+        if (result.conversionId) {
+          toast.success(`Extracted ${result.tables.length} table(s) with your preferences!`);
+          setLocation(`/results/${result.conversionId}`);
+          return;
+        }
+
+        // Fallback: show results inline
         setProcessingStep('ready');
         setExtractedTables(result.tables);
         const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
@@ -727,6 +762,14 @@ export default function Convert() {
       });
 
       if (result.success && result.tables) {
+        // Redirect to Results page for persistent viewing
+        if (result.conversionId) {
+          toast.success(`Extracted ${result.tables.length} table(s)!`);
+          setLocation(`/results/${result.conversionId}`);
+          return;
+        }
+
+        // Fallback: show results inline
         setProcessingStep('ready');
         setExtractedTables(result.tables);
         const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
@@ -839,17 +882,17 @@ export default function Convert() {
             {pendingFiles && pendingFiles.length > 0 ? (
               <Card className="border-2 border-dashed border-green-300 bg-green-50 dark:bg-green-900/20">
                 <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Files className="h-10 w-10 text-green-600" />
-                      <div>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-start gap-3">
+                      <Files className="h-10 w-10 text-green-600 flex-shrink-0" />
+                      <div className="min-w-0 flex-1">
                         <p className="font-medium">{pendingFiles.length} files ready</p>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-sm text-muted-foreground line-clamp-3">
                           {pendingFiles.map(f => f.name).join(', ')}
                         </p>
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 justify-end">
                       <Button
                         variant="outline"
                         onClick={() => setPendingFiles(null)}

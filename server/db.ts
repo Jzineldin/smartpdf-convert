@@ -277,6 +277,16 @@ export async function getUserConversions(userId: number, limit: number = 20): Pr
     .limit(limit);
 }
 
+export async function getConversionsByBatchId(batchId: string): Promise<Conversion[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select()
+    .from(conversions)
+    .where(eq(conversions.batchId, batchId))
+    .orderBy(conversions.id);
+}
+
 // ============================================
 // TEMPLATES
 // ============================================

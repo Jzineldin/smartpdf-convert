@@ -122,6 +122,34 @@ function normalizeConfidence(confidence: number | undefined): number {
   return Math.min(Math.max(confidence, 0), 1);
 }
 
+/**
+ * Smart sheet name truncation that preserves meaningful content
+ * Excel sheet names are limited to 31 characters
+ */
+function smartTruncateSheetName(name: string, suffix: string = ''): string {
+  const maxLength = 31;
+  const availableLength = maxLength - suffix.length;
+
+  if (name.length <= availableLength) {
+    return name + suffix;
+  }
+
+  // Try to truncate at word boundary
+  let truncated = name.substring(0, availableLength);
+
+  // Find the last space to avoid cutting mid-word
+  const lastSpace = truncated.lastIndexOf(' ');
+  if (lastSpace > availableLength * 0.6) {
+    // Only use word boundary if we keep at least 60% of the length
+    truncated = truncated.substring(0, lastSpace);
+  }
+
+  // Remove trailing special characters
+  truncated = truncated.replace(/[\s\-_.,]+$/, '');
+
+  return truncated + suffix;
+}
+
 // ============================================
 // PROMPTS
 // ============================================
@@ -140,6 +168,18 @@ ANALYZE THE DOCUMENT FOR:
 6. Content that might be skipped (ASCII diagrams, charts, decorative elements)
 7. Image quality issues that may affect extraction
 
+=== CRITICAL TABLE COUNTING RULES ===
+When counting "tablesDetected", follow these rules STRICTLY:
+1. Count EACH visually separate table as ONE table
+2. Tables with DIFFERENT column structures = DIFFERENT tables (count separately)
+3. Tables separated by whitespace, headings, or text = DIFFERENT tables
+4. A table about "Product A" and another about "Product B" = 2 SEPARATE tables
+5. Do NOT pre-group or combine tables in your count - count them individually
+6. If a page has 5 separate bordered/structured data sections, report 5 tables
+
+Example: A competitive analysis with sections for 6 different competitors = 6+ tables, NOT 1
+=== END TABLE COUNTING RULES ===
+
 === PROACTIVE QUESTIONS - ALWAYS ASK IF PATTERNS DETECTED ===
 
 CHECKBOX/SYMBOL PATTERNS:
@@ -150,7 +190,10 @@ Options should include: "Yes/supported → ✅" | "No/not supported → ❌" | "
 COMPARISON/FEATURE TABLES:
 If the document compares multiple products, services, or competitors:
 ALWAYS ask about table structure preference.
-Options: "One combined comparison table" | "Separate tables per item" | "Keep as found"
+Options: "Keep as separate tables (recommended)" | "Combine into one comparison table" | "Keep original structure as-is"
+Default: "Keep as separate tables (recommended)"
+
+IMPORTANT: Each competitor/product section with its own data = separate table. Do NOT combine unless user explicitly requests it.
 
 EMPTY/BLANK CELLS:
 If tables have many empty or blank cells:
@@ -253,9 +296,21 @@ Apply ALL user instructions above during extraction. This includes:
 - Content inclusion/exclusion (skip what user said to skip)
 - Output format preferences
 
-SHEET NAMING (MAX 20 CHARS):
-- Use short descriptive names
-- If user wants combined tables, use descriptive combined name
+=== CRITICAL TABLE EXTRACTION RULES ===
+1. Extract EVERY visually distinct table as a SEPARATE entry in the "tables" array
+2. Tables with different column counts MUST be separate tables
+3. Tables about different subjects/items (competitors, products) = SEPARATE tables
+4. If user says "keep separate" or "separate tables", do NOT combine ANY tables
+5. Only combine tables if user EXPLICITLY requested combination AND tables have identical structure
+6. COMPLETENESS IS CRITICAL: Missing tables is WORSE than extracting extra tables
+7. When in doubt, keep tables separate
+=== END TABLE RULES ===
+
+SHEET NAMING (MAX 25 CHARS):
+- Use short but DESCRIPTIVE names that uniquely identify each table
+- For competitor analysis: use competitor/product name (e.g., "Canva", "Jasper AI", "NovelAI")
+- EACH table MUST have a UNIQUE name - never use generic names like "Table 1", "Data", "Sheet1"
+- If multiple tables about similar topics, differentiate by content (e.g., "Canva Features", "Canva Pricing")
 - Add page suffix only for multi-page documents with same-named tables
 
 PRESERVE SPECIAL CHARACTERS (unless user specified conversion):
@@ -263,11 +318,32 @@ PRESERVE SPECIAL CHARACTERS (unless user specified conversion):
 - X marks: ❌ ✗ ☒ → keep as-is OR convert per user instruction
 - All currency symbols: $ € £ ¥ kr SEK → always preserve exactly
 - All mathematical symbols: ± × ÷ ≈ ≠ ≤ ≥ % → always preserve exactly
+- Subscripts: O₂ CO₂ H₂O → keep subscript digits (₀₁₂₃₄₅₆₇₈₉)
+- Superscripts: m³ km² → keep superscript digits (⁰¹²³⁴⁵⁶⁷⁸⁹)
+- Em-dash: — → keep as — (not - or ?)
+
+NUMBER FORMAT PRESERVATION:
+- Keep number formats EXACTLY as shown (do NOT convert 2,340 to 2.340 or vice versa)
+- European format 1.000,50 and US format 1,000.50 must be preserved as-is
 
 MERGED/SPANNING CELLS:
 - REPEAT the value in EVERY row it spans
 - Count headers FIRST - every row needs EXACTLY that many columns
 - NEVER use empty string "" - use null ONLY for truly empty cells
+
+HEADERS MUST HAVE DATA:
+- A table is NOT just headers - every table MUST include the data rows below it
+- If you see a header row followed by data rows, they are ONE table together
+- NEVER extract just headers without the data rows beneath them
+- Section headings are NOT table headers - look for the actual column headers AND data
+
+TOTALS/SUMMARY SECTIONS - KEEP SEPARATE:
+- If a table has line items AND a totals/summary section below it, create TWO separate tables:
+  1. "Items" or main table with the line items
+  2. "Totals" or "Summary" table with subtotal, tax, total rows
+- Common totals indicators: "Subtotal", "Tax", "Total", "Sum", "Grand Total", "Amount Due"
+- Do NOT append totals rows to item tables - they have different column structures
+- If totals appear in a separate visual area (footer, box, different alignment), make it a separate table
 
 OUTPUT FORMAT:
 {
@@ -299,9 +375,24 @@ VALIDATION BEFORE OUTPUT:
 
 const SYSTEM_PROMPT = `You are a precise data extraction AI. Extract ALL tables from PDF images and return them as structured JSON.
 
-SHEET NAMING (MAX 20 CHARS):
-- Use short descriptive names: "Market Data", "Pricing", "Features", "Contacts"
-- Never exceed 20 characters before automatic page suffix
+=== CRITICAL - SEPARATE TABLE DETECTION ===
+1. Each visually distinct table = ONE entry in "tables" array
+2. Tables with different column structures = DIFFERENT tables (never combine)
+3. Tables about different topics/subjects = DIFFERENT tables
+4. Tables separated by text, headings, or whitespace = DIFFERENT tables
+5. NEVER combine tables unless they are clearly a continuation with identical columns
+6. When in doubt, keep tables SEPARATE
+7. COMPLETENESS: Extract EVERY table you see - missing data is worse than extra tables
+
+Example: A document with info about 6 different competitors = 6+ separate tables in output
+=== END SEPARATE TABLE RULES ===
+
+SHEET NAMING (MAX 25 CHARS):
+- Use short but DESCRIPTIVE names that uniquely identify each table
+- For competitor/product analysis: use the item name (e.g., "Canva", "Jasper AI", "NovelAI")
+- EACH table MUST have a UNIQUE name - never use generic names like "Table 1", "Data"
+- If extracting multiple tables from same category, differentiate them (e.g., "Features", "Pricing", "Overview")
+- Never exceed 25 characters before automatic page suffix
 
 CRITICAL - PRESERVE ALL SPECIAL CHARACTERS EXACTLY:
 - Checkmarks: ✅ ✓ ☑ → keep exactly as-is
@@ -310,13 +401,37 @@ CRITICAL - PRESERVE ALL SPECIAL CHARACTERS EXACTLY:
 - Bullets: • ◦ ▪ ▫ → keep exactly as-is
 - Currency: $ € £ ¥ kr SEK NOK DKK → keep exactly as-is
 - Math: ± × ÷ ≈ ≠ ≤ ≥ % ‰ → keep exactly as-is
+- Subscripts: O₂ CO₂ H₂O → keep subscript characters (₀₁₂₃₄₅₆₇₈₉)
+- Superscripts: m³ km² ft³ → keep superscript characters (⁰¹²³⁴⁵⁶⁷⁸⁹)
+- Em-dash: — (long dash) → keep as — not as - or ?
 If you cannot identify a character, use [?].
+
+NUMBER FORMAT PRESERVATION:
+- CRITICAL: Preserve number formats EXACTLY as they appear in the document
+- If document shows "2,340" keep as "2,340" (comma separator)
+- If document shows "2.340" keep as "2.340" (period separator)
+- Do NOT convert between European (1.000,50) and US (1,000.50) formats
+- The user will handle localization in post-processing
 
 CRITICAL - MERGED/SPANNING CELLS:
 When a cell visually spans multiple rows in the PDF:
 1. REPEAT that value in EVERY row it spans
 2. Count headers FIRST - every data row needs EXACTLY that many columns
 3. NEVER use empty string "" - use null ONLY for genuinely empty cells
+
+CRITICAL - HEADERS MUST HAVE DATA:
+- A table is NOT just headers - every table MUST include the data rows below it
+- If you see a header row followed by data rows, they are ONE table together
+- NEVER extract just headers without the data rows beneath them
+- Section headings (like "10.1 Tale Forges svenska fördel") are NOT table headers
+- Look for the actual column header row (e.g., "Fördel | Beskrivning") AND its data rows
+
+TOTALS/SUMMARY SECTIONS - KEEP SEPARATE:
+- If a document has line items AND totals below, create SEPARATE tables for each
+- Line items table: the main data rows (products, services, etc.)
+- Totals table: subtotal, tax, discount, total rows with their values
+- Do NOT mix totals into item rows (they have different column structures)
+- Common totals: "Subtotal", "Tax", "Total", "Sum", "Grand Total", "Amount Due", "Balance"
 
 OUTPUT FORMAT:
 {
@@ -404,6 +519,16 @@ function buildGuidanceString(guidance: UserGuidance): string {
     parts.push('USER ANSWERS TO QUESTIONS:');
     for (const [questionId, answer] of Object.entries(guidance.answers)) {
       parts.push(`- ${questionId}: ${answer}`);
+
+      // Add explicit symbol conversion instructions based on common answer patterns
+      if (questionId.includes('symbol') || questionId.includes('checkbox')) {
+        if (answer.includes('Yes') || answer.includes('supported') || answer.includes('✅')) {
+          parts.push('  → CRITICAL: Convert ALL □ ☐ symbols to ✅ in the output');
+          parts.push('  → CRITICAL: Convert ALL ■ ☑ ✓ symbols to ✅ in the output');
+        } else if (answer.includes('No') || answer.includes('not supported') || answer.includes('❌')) {
+          parts.push('  → CRITICAL: Convert ALL □ ☐ symbols to ❌ in the output');
+        }
+      }
     }
   }
 
@@ -422,9 +547,9 @@ function buildGuidanceString(guidance: UserGuidance): string {
       parts.push(`- Use ${prefs.outputLanguage} for column headers and field names`);
     }
     if (prefs.symbolMapping) {
-      parts.push('- Symbol conversions:');
+      parts.push('- CRITICAL SYMBOL CONVERSIONS (apply to ALL matching symbols):');
       for (const [from, to] of Object.entries(prefs.symbolMapping)) {
-        parts.push(`  - Convert "${from}" to "${to}"`);
+        parts.push(`  - Convert EVERY "${from}" to "${to}"`);
       }
     }
   }
@@ -437,15 +562,124 @@ function buildGuidanceString(guidance: UserGuidance): string {
   return parts.join('\n');
 }
 
+/**
+ * Apply symbol conversions to extracted tables based on user guidance
+ * This ensures symbols are converted even if the AI didn't do it
+ */
+function applySymbolConversions(tables: ExtractedTable[], guidance: UserGuidance): ExtractedTable[] {
+  // Determine what conversion to apply based on user answers
+  let convertCheckboxesToYes = false;
+  let convertCheckboxesToNo = false;
+
+  // Check answers for symbol-related questions
+  for (const [questionId, answer] of Object.entries(guidance.answers)) {
+    const answerStr = String(answer).toLowerCase();
+    if (questionId.includes('symbol') || questionId.includes('checkbox') || answerStr.includes('□')) {
+      if (answerStr.includes('yes') || answerStr.includes('supported') || answerStr.includes('✅')) {
+        convertCheckboxesToYes = true;
+      } else if (answerStr.includes('no') || answerStr.includes('not supported') || answerStr.includes('❌')) {
+        convertCheckboxesToNo = true;
+      }
+    }
+  }
+
+  // Also check symbolMapping in output preferences
+  const symbolMapping = guidance.outputPreferences?.symbolMapping || {};
+
+  // If no conversion needed, return tables as-is
+  if (!convertCheckboxesToYes && !convertCheckboxesToNo && Object.keys(symbolMapping).length === 0) {
+    return tables;
+  }
+
+  // Apply conversions to all tables
+  return tables.map(table => {
+    const convertCell = (cell: string | null): string | null => {
+      if (cell === null) return null;
+      let result = cell;
+
+      // Apply explicit symbol mapping first
+      for (const [from, to] of Object.entries(symbolMapping)) {
+        result = result.split(from).join(to);
+      }
+
+      // Apply checkbox conversions based on user answer
+      if (convertCheckboxesToYes) {
+        // Empty checkbox symbols → ✅
+        result = result.replace(/□|☐|▢/g, '✅');
+        // Filled checkbox/checkmark symbols → ✅
+        result = result.replace(/■|☑|✓|✔/g, '✅');
+      } else if (convertCheckboxesToNo) {
+        // Empty checkbox symbols → ❌
+        result = result.replace(/□|☐|▢/g, '❌');
+      }
+
+      return result;
+    };
+
+    return {
+      ...table,
+      headers: table.headers.map(h => convertCell(h) || h),
+      rows: table.rows.map(row => row.map(cell => convertCell(cell))),
+    };
+  });
+}
+
+/**
+ * Detect if a table has a merged cell pattern (first columns empty in some rows)
+ * This helps distinguish intentional merged cells from tables that just have empty values
+ */
+function detectMergedCellPattern(rows: (string | null)[][], headerCount: number): boolean {
+  if (rows.length < 3) return false; // Need at least a few rows to detect pattern
+
+  let rowsWithEmptyFirstCol = 0;
+  let rowsWithDataFirstCol = 0;
+  let consecutiveEmptyGroups = 0;
+  let lastHadData = true;
+
+  for (const row of rows) {
+    const firstColEmpty = !row[0] || row[0] === '';
+    const hasDataAfterFirst = row.slice(1).some(v => v !== '' && v !== null);
+
+    if (firstColEmpty && hasDataAfterFirst) {
+      rowsWithEmptyFirstCol++;
+      if (lastHadData) {
+        consecutiveEmptyGroups++;
+      }
+      lastHadData = false;
+    } else if (!firstColEmpty) {
+      rowsWithDataFirstCol++;
+      lastHadData = true;
+    }
+  }
+
+  // Pattern detected if:
+  // 1. Some rows have empty first col but data in other cols
+  // 2. There's a mix (not all rows are the same)
+  // 3. The pattern appears in groups (merged cells typically span multiple rows)
+  const hasPattern = rowsWithEmptyFirstCol > 0 &&
+                     rowsWithDataFirstCol > 0 &&
+                     consecutiveEmptyGroups >= 1 &&
+                     rowsWithEmptyFirstCol >= 2;
+
+  return hasPattern;
+}
+
 function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
   return tables.map(table => {
     const headerCount = table.headers.length;
     const processedRows: (string | null)[][] = [];
+
+    // First pass: analyze table structure to detect if merged cell filling is appropriate
+    // Only fill merged cells if we see a clear pattern of group headers
+    const hasMergedCellPattern = detectMergedCellPattern(table.rows, headerCount);
+
     const lastValues: (string | null)[] = new Array(headerCount).fill(null);
 
     for (let rowIndex = 0; rowIndex < table.rows.length; rowIndex++) {
       let row = [...table.rows[rowIndex]];
 
+      // Remove leading empty cells only if row is longer than expected
+      // This fixes AI sometimes adding extra empty cells at the start
       let leadingEmpties = 0;
       for (let i = 0; i < row.length; i++) {
         if (row[i] === '' || row[i] === null) {
@@ -461,27 +695,39 @@ function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
         row = row.slice(emptiesToRemove);
       }
 
+      // Pad short rows with null
       while (row.length < headerCount) {
         row.push(null);
       }
 
+      // Trim rows that are too long
       if (row.length > headerCount) {
         row = row.slice(0, headerCount);
       }
 
-      for (let colIndex = 0; colIndex < row.length; colIndex++) {
-        const value = row[colIndex];
-        if ((value === '' || value === null) && lastValues[colIndex] !== null) {
-          const hasDataAfter = row.slice(colIndex + 1).some(v => v !== '' && v !== null);
-          if (colIndex < 3 && hasDataAfter) {
-            row[colIndex] = lastValues[colIndex];
+      // Only fill from previous row if we detected a merged cell pattern
+      // This prevents incorrect filling when tables just have empty cells
+      if (hasMergedCellPattern) {
+        for (let colIndex = 0; colIndex < Math.min(2, row.length); colIndex++) {
+          const value = row[colIndex];
+          if ((value === '' || value === null) && lastValues[colIndex] !== null) {
+            // Only fill if there's actual data after this cell
+            const hasDataAfter = row.slice(colIndex + 1).some(v => v !== '' && v !== null);
+            if (hasDataAfter) {
+              row[colIndex] = lastValues[colIndex];
+            }
           }
-        }
-        if (value !== '' && value !== null) {
-          lastValues[colIndex] = value;
         }
       }
 
+      // Track non-empty values for potential merged cell filling
+      for (let colIndex = 0; colIndex < row.length; colIndex++) {
+        if (row[colIndex] !== '' && row[colIndex] !== null) {
+          lastValues[colIndex] = row[colIndex];
+        }
+      }
+
+      // Convert empty strings to null
       row = row.map(v => v === '' ? null : v);
       processedRows.push(row);
     }
@@ -499,6 +745,172 @@ function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
     }
 
     return { ...table, rows: processedRows, confidence: normalizedConfidence };
+  });
+}
+
+/**
+ * Filter out empty or low-quality tables
+ * - Removes tables with 0 data rows
+ * - Removes tables where all cells are null/empty
+ * - Flags tables with low confidence (but keeps them with warning)
+ */
+function filterEmptyTables(tables: ExtractedTable[]): { tables: ExtractedTable[]; warnings: AIWarning[] } {
+  const warnings: AIWarning[] = [];
+  const MIN_CONFIDENCE_THRESHOLD = 0.5; // 50%
+
+  const filteredTables = tables.filter(table => {
+    // Get confidence as number
+    const confidence = typeof table.confidence === 'number'
+      ? table.confidence
+      : table.confidence?.overall ?? 0.9;
+
+    // Filter out tables with 0 data rows
+    if (table.rows.length === 0) {
+      warnings.push({
+        type: 'skipped_content',
+        message: `Removed empty table "${table.sheetName}" (no data rows)`,
+        pageNumber: table.pageNumber,
+        suggestion: 'This table had headers but no data and was removed.',
+      });
+      return false;
+    }
+
+    // Check if all cells are null/empty
+    const hasAnyData = table.rows.some(row =>
+      row.some(cell => cell !== null && cell !== '' && cell !== undefined)
+    );
+
+    if (!hasAnyData) {
+      warnings.push({
+        type: 'skipped_content',
+        message: `Removed table "${table.sheetName}" (all cells empty)`,
+        pageNumber: table.pageNumber,
+        suggestion: 'This table had no actual data content and was removed.',
+      });
+      return false;
+    }
+
+    // Flag low confidence tables but keep them
+    if (confidence < MIN_CONFIDENCE_THRESHOLD) {
+      warnings.push({
+        type: 'low_resolution',
+        message: `Table "${table.sheetName}" has low confidence (${Math.round(confidence * 100)}%)`,
+        pageNumber: table.pageNumber,
+        suggestion: 'Review this table carefully as extraction quality may be poor.',
+      });
+    }
+
+    return true;
+  });
+
+  return { tables: filteredTables, warnings };
+}
+
+/**
+ * Ensure all sheet names are unique
+ * If duplicates exist, append distinguishing suffix
+ */
+function ensureUniqueSheetNames(tables: ExtractedTable[]): ExtractedTable[] {
+  const nameCount: Map<string, number> = new Map();
+  const usedNames: Set<string> = new Set();
+
+  return tables.map(table => {
+    let baseName = table.sheetName;
+
+    // If this name has been used, make it unique
+    if (usedNames.has(baseName)) {
+      const count = (nameCount.get(baseName) || 1) + 1;
+      nameCount.set(baseName, count);
+
+      // Try to make name more descriptive
+      // First, try adding page number if different
+      let newName = `${baseName} ${count}`;
+
+      // If we have headers that differ, use first header as differentiator
+      if (table.headers.length > 0) {
+        const firstHeader = table.headers[0];
+        // Check if firstHeader provides useful differentiation (not too generic)
+        if (firstHeader &&
+            firstHeader.length > 2 &&
+            firstHeader.length < 15 &&
+            !['id', 'name', 'feature', 'item', '#', 'no', 'nr'].includes(firstHeader.toLowerCase())) {
+          // Truncate if needed to fit in 31 chars
+          const maxBaseLength = 25 - firstHeader.length - 3; // " - " separator
+          if (maxBaseLength > 10) {
+            newName = `${baseName.substring(0, maxBaseLength)} - ${firstHeader}`;
+          }
+        }
+      }
+
+      // Ensure the new name is also unique
+      let counter = 2;
+      let finalName = newName;
+      while (usedNames.has(finalName)) {
+        finalName = `${baseName} ${counter}`;
+        counter++;
+      }
+
+      usedNames.add(finalName);
+      return { ...table, sheetName: smartTruncateSheetName(finalName) };
+    }
+
+    usedNames.add(baseName);
+    nameCount.set(baseName, 1);
+    return table;
+  });
+}
+
+/**
+ * Validate extraction completeness against analysis expectations
+ * Returns warnings if extraction might be missing tables
+ */
+function validateExtractionCompleteness(
+  expectedTableCount: number | undefined,
+  extractedTables: ExtractedTable[]
+): AIWarning[] {
+  const warnings: AIWarning[] = [];
+  const actualCount = extractedTables.length;
+
+  // Skip validation if we don't have an expected count
+  if (!expectedTableCount || expectedTableCount <= 0) {
+    return warnings;
+  }
+
+  // Warn if we extracted significantly fewer tables than expected
+  if (actualCount < expectedTableCount * 0.7) {
+    warnings.push({
+      type: 'skipped_content',
+      message: `Expected approximately ${expectedTableCount} tables but only extracted ${actualCount}. Some tables may have been missed or incorrectly combined.`,
+      suggestion: 'Review the extracted data and consider re-processing if tables are missing.',
+    });
+  }
+
+  // Warn if we extracted way more than expected (might indicate over-splitting)
+  if (actualCount > expectedTableCount * 2 && expectedTableCount >= 3) {
+    warnings.push({
+      type: 'structure_ambiguous',
+      message: `Extracted ${actualCount} tables, which is more than the ${expectedTableCount} initially detected. Some content may have been split into multiple tables.`,
+      suggestion: 'Review the table structure in the output.',
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * Log table column structure for debugging
+ * Helps identify when tables have inconsistent structures
+ */
+function logTableStructures(tables: ExtractedTable[], context: string): void {
+  if (tables.length === 0) return;
+
+  console.log(`[${context}] Table structures:`);
+  tables.forEach((table, i) => {
+    const rowLengths = table.rows.map(r => r.length);
+    const uniqueLengths = Array.from(new Set(rowLengths));
+    const hasInconsistentRows = uniqueLengths.length > 1;
+
+    console.log(`  Table ${i + 1} "${table.sheetName}": ${table.headers.length} headers, ${table.rows.length} rows${hasInconsistentRows ? ` (INCONSISTENT: ${uniqueLengths.join(', ')} cols)` : ''}`);
   });
 }
 
@@ -819,12 +1231,32 @@ export async function extractWithGuidance(
   try {
     const cleanContent = result.content!.replace(/```json\n?|\n?```/g, '').trim();
     const parsed = JSON.parse(cleanContent);
-    const processedTables = postProcessTables(parsed.tables || []);
+    let processedTables = postProcessTables(parsed.tables || []);
+
+    // Debug: Log tables with 0 rows before filtering
+    const emptyTables = processedTables.filter(t => t.rows.length === 0);
+    if (emptyTables.length > 0) {
+      console.log(`[AI Extraction] Found ${emptyTables.length} tables with 0 data rows:`,
+        emptyTables.map(t => ({ name: t.sheetName, headers: t.headers, page: t.pageNumber }))
+      );
+    }
+
+    // Apply symbol conversions based on user guidance (ensures conversion even if AI didn't do it)
+    processedTables = applySymbolConversions(processedTables, guidance);
+
+    // Filter out empty tables and collect warnings
+    const { tables: filteredTables, warnings: filterWarnings } = filterEmptyTables(processedTables);
+
+    // Ensure unique sheet names
+    const uniqueTables = ensureUniqueSheetNames(filteredTables);
+
+    // Combine all warnings
+    const allWarnings = [...(parsed.warnings || []), ...filterWarnings];
 
     return {
       success: true,
-      tables: processedTables,
-      warnings: parsed.warnings || [],
+      tables: uniqueTables,
+      warnings: allWarnings,
       confidence: normalizeConfidence(parsed.overallConfidence),
       processingTime: Date.now() - startTime,
       appliedGuidance: parsed.appliedGuidance || [],
@@ -929,7 +1361,15 @@ export async function extractTablesFromPDF(
       };
     }
 
-    const processedTables = postProcessTables(parsed.tables || []);
+    let processedTables = postProcessTables(parsed.tables || []);
+
+    // Debug: Log tables with 0 rows before filtering
+    const emptyTables = processedTables.filter(t => t.rows.length === 0);
+    if (emptyTables.length > 0) {
+      console.log(`[Quick Extraction] Found ${emptyTables.length} tables with 0 data rows:`,
+        emptyTables.map(t => ({ name: t.sheetName, headers: t.headers, page: t.pageNumber }))
+      );
+    }
 
     // If no tables found, try fallback extraction
     if (processedTables.length === 0) {
@@ -961,10 +1401,19 @@ export async function extractTablesFromPDF(
       }
     }
 
+    // Filter out empty tables and collect warnings
+    const { tables: filteredTables, warnings: filterWarnings } = filterEmptyTables(processedTables);
+
+    // Ensure unique sheet names
+    const uniqueTables = ensureUniqueSheetNames(filteredTables);
+
+    // Combine all warnings
+    const allWarnings = [...(parsed.warnings || []), ...filterWarnings];
+
     return {
       success: true,
-      tables: processedTables,
-      warnings: parsed.warnings || [],
+      tables: uniqueTables,
+      warnings: allWarnings,
       confidence: normalizeConfidence(parsed.overallConfidence),
       processingTime: Date.now() - startTime,
     };
@@ -1025,20 +1474,8 @@ export async function extractTablesFromMultiplePages(
 
     if (result.success) {
       const tablesWithPageNum = result.tables.map(table => {
-        let sheetName = table.sheetName;
-
-        if (pages.length > 1) {
-          const suffix = ` (P${page.pageNumber})`;
-          const maxBaseLength = 31 - suffix.length;
-          if (sheetName.length > maxBaseLength) {
-            sheetName = sheetName.substring(0, maxBaseLength);
-          }
-          sheetName = sheetName + suffix;
-        }
-
-        if (sheetName.length > 31) {
-          sheetName = sheetName.substring(0, 31);
-        }
+        const suffix = pages.length > 1 ? ` (P${page.pageNumber})` : '';
+        const sheetName = smartTruncateSheetName(table.sheetName, suffix);
 
         return { ...table, pageNumber: page.pageNumber, sheetName };
       });
@@ -1075,10 +1512,15 @@ export async function extractTablesFromMultiplePages(
     };
   }
 
+  // Apply filtering and unique naming across all pages
+  const { tables: filteredTables, warnings: filterWarnings } = filterEmptyTables(allTables);
+  const uniqueTables = ensureUniqueSheetNames(filteredTables);
+  const combinedWarnings = [...allWarnings, ...filterWarnings];
+
   return {
     success: true,
-    tables: allTables,
-    warnings: allWarnings,
+    tables: uniqueTables,
+    warnings: combinedWarnings,
     confidence: successfulPages > 0 ? totalConfidence / successfulPages : 0,
     processingTime: Date.now() - startTime,
   };

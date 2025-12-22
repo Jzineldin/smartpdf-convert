@@ -111,17 +111,13 @@ export default function PreviewContainer({
 
   // When user selects a sheet, sync PDF to that page
   const handleSheetChange = useCallback((sheetName: string) => {
-    console.log('[PreviewContainer] Sheet changed to:', sheetName);
     setCurrentSheet(sheetName);
     onSheetChange?.(sheetName);
 
     const sheet = extractedSheets.find(s => s.sheetName === sheetName);
     if (sheet) {
-      console.log('[PreviewContainer] Syncing PDF to page:', sheet.pageNumber);
       setCurrentPage(sheet.pageNumber);
       onPageChange?.(sheet.pageNumber);
-    } else {
-      console.log('[PreviewContainer] Sheet not found in extractedSheets');
     }
   }, [extractedSheets, onSheetChange, onPageChange]);
 

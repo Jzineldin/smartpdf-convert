@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Link, useLocation, useParams } from 'wouter';
 import { trpc } from '@/lib/trpc';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
@@ -21,8 +21,10 @@ import {
   Loader2,
   XCircle,
   Clock,
+  Files,
 } from 'lucide-react';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
+import SmartSuggestions from '@/components/results/SmartSuggestions';
 import { toast } from 'sonner';
 
 interface ConfidenceBreakdown {
@@ -48,6 +50,7 @@ interface ExtractedTable {
   rows: (string | null)[][];
   pageNumber: number;
   confidence: number | ConfidenceBreakdown;
+  sourceFile?: string;
 }
 
 interface AIWarning {
@@ -55,6 +58,34 @@ interface AIWarning {
   message: string;
   pageNumber?: number;
   suggestion: string;
+}
+
+// Helper to parse tables from conversion
+function parseTablesFromConversion(conversion: any): ExtractedTable[] {
+  if (!conversion?.extractedTables) return [];
+  try {
+    if (typeof conversion.extractedTables === 'string') {
+      return JSON.parse(conversion.extractedTables);
+    }
+    return conversion.extractedTables as ExtractedTable[];
+  } catch {
+    return [];
+  }
+}
+
+// Helper to parse warnings from conversion
+function parseWarningsFromConversion(conversion: any): AIWarning[] {
+  if (!conversion?.aiWarnings) return [];
+  try {
+    if (typeof conversion.aiWarnings === 'string') {
+      return JSON.parse(conversion.aiWarnings);
+    }
+    return (conversion.aiWarnings as AIWarning[]).filter(
+      (w) => w && typeof w.message === 'string'
+    );
+  } catch {
+    return [];
+  }
 }
 
 const getConfidenceValue = (confidence: number | ConfidenceBreakdown): number => {
@@ -69,9 +100,11 @@ export default function Results() {
   const [, setLocation] = useLocation();
   const { isAuthenticated } = useSupabaseAuth();
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'edit'>('preview');
+  const [optimizedTables, setOptimizedTables] = useState<ExtractedTable[] | null>(null);
 
   const conversionId = params.id ? parseInt(params.id, 10) : null;
 
+  // Fetch the primary conversion
   const {
     data: conversion,
     isLoading,
@@ -82,37 +115,70 @@ export default function Results() {
     { enabled: !!conversionId }
   );
 
-  // Parse extracted tables from conversion data
+  // If this conversion has a batchId, fetch all conversions in the batch
+  const batchId = conversion?.batchId;
+  const {
+    data: batchConversions,
+    isLoading: isBatchLoading,
+  } = trpc.conversion.getBatch.useQuery(
+    { batchId: batchId! },
+    { enabled: !!batchId }
+  );
+
+  // Determine if this is a batch view
+  const isBatchView = !!batchId && (batchConversions?.length ?? 0) > 1;
+  const allConversions = isBatchView ? batchConversions : (conversion ? [conversion] : []);
+
+  // Combine tables from all conversions in the batch
   const extractedTables: ExtractedTable[] = useMemo(() => {
-    if (!conversion?.extractedTables) return [];
-    try {
-      if (typeof conversion.extractedTables === 'string') {
-        return JSON.parse(conversion.extractedTables);
-      }
-      return conversion.extractedTables as ExtractedTable[];
-    } catch {
-      return [];
-    }
-  }, [conversion?.extractedTables]);
+    if (!allConversions || allConversions.length === 0) return [];
 
-  // Parse warnings
+    const allTables: ExtractedTable[] = [];
+    for (const conv of allConversions) {
+      const tables = parseTablesFromConversion(conv);
+      // Add source file info for batch view
+      const tablesWithSource = tables.map(t => ({
+        ...t,
+        sourceFile: conv.originalFilename,
+      }));
+      allTables.push(...tablesWithSource);
+    }
+    return allTables;
+  }, [allConversions]);
+
+  // Combine warnings from all conversions
   const warnings: AIWarning[] = useMemo(() => {
-    if (!conversion?.aiWarnings) return [];
-    try {
-      if (typeof conversion.aiWarnings === 'string') {
-        return JSON.parse(conversion.aiWarnings);
-      }
-      return (conversion.aiWarnings as AIWarning[]).filter(
-        (w) => w && typeof w.message === 'string'
-      );
-    } catch {
-      return [];
-    }
-  }, [conversion?.aiWarnings]);
+    if (!allConversions || allConversions.length === 0) return [];
 
-  const confidence = conversion?.aiConfidenceScore
-    ? parseFloat(String(conversion.aiConfidenceScore))
-    : 0;
+    const allWarnings: AIWarning[] = [];
+    for (const conv of allConversions) {
+      allWarnings.push(...parseWarningsFromConversion(conv));
+    }
+    return allWarnings;
+  }, [allConversions]);
+
+  // Calculate average confidence for batch
+  const confidence = useMemo(() => {
+    if (!allConversions || allConversions.length === 0) return 0;
+    const validConversions = allConversions.filter(c => c.aiConfidenceScore);
+    if (validConversions.length === 0) return 0;
+    const total = validConversions.reduce((sum, c) => sum + parseFloat(String(c.aiConfidenceScore)), 0);
+    return total / validConversions.length;
+  }, [allConversions]);
+
+  // Total page count for batch
+  const totalPageCount = useMemo(() => {
+    if (!allConversions) return 0;
+    return allConversions.reduce((sum, c) => sum + (c.pageCount || 1), 0);
+  }, [allConversions]);
+
+  // Use optimized tables if available, otherwise use extracted tables
+  const displayTables = optimizedTables ?? extractedTables;
+
+  // Handler for when tables are modified by SmartSuggestions
+  const handleTablesChange = useCallback((newTables: ExtractedTable[]) => {
+    setOptimizedTables(newTables);
+  }, []);
 
   // Determine if we have PDF data (would need to be stored separately or re-fetched)
   // For now, split view won't work for historical conversions without stored PDF
@@ -140,7 +206,7 @@ export default function Results() {
     );
   }
 
-  if (isLoading) {
+  if (isLoading || (batchId && isBatchLoading)) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <Header />
@@ -322,21 +388,32 @@ export default function Results() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4 flex-wrap">
               <h2 className="text-2xl font-bold truncate max-w-md">
-                {conversion.originalFilename}
+                {isBatchView ? 'Batch Results' : conversion.originalFilename}
               </h2>
+              {isBatchView && (
+                <Badge variant="outline" className="font-normal gap-1">
+                  <Files className="h-3 w-3" />
+                  {allConversions?.length} files
+                </Badge>
+              )}
               <Badge
                 variant={confidence >= 0.9 ? 'default' : confidence >= 0.7 ? 'secondary' : 'destructive'}
                 className="font-normal"
               >
                 {Math.round(confidence * 100)}% confidence
               </Badge>
-              {conversion.pageCount && conversion.pageCount > 1 && (
+              {totalPageCount > 1 && (
                 <Badge variant="outline" className="font-normal">
-                  {conversion.pageCount} pages
+                  {totalPageCount} pages
                 </Badge>
               )}
               <Badge variant="outline" className="font-normal">
-                {extractedTables.length} table{extractedTables.length > 1 ? 's' : ''}
+                {displayTables.length} table{displayTables.length > 1 ? 's' : ''}
+                {optimizedTables && displayTables.length !== extractedTables.length && (
+                  <span className="text-muted-foreground ml-1">
+                    (was {extractedTables.length})
+                  </span>
+                )}
               </Badge>
             </div>
             <div className="flex items-center gap-2">
@@ -359,9 +436,33 @@ export default function Results() {
           {/* Confidence Score */}
           <ConfidenceScore
             confidence={confidence}
-            tableCount={extractedTables.length}
-            pageCount={conversion.pageCount || undefined}
+            tableCount={displayTables.length}
+            pageCount={totalPageCount || undefined}
           />
+
+          {/* Batch Files List */}
+          {isBatchView && allConversions && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Files className="h-5 w-5" />
+                  Files in this batch
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-2">
+                  {allConversions.map((conv, index) => (
+                    <Badge key={conv.id} variant="outline" className="font-normal">
+                      {conv.originalFilename}
+                      <span className="ml-1 text-muted-foreground">
+                        ({parseTablesFromConversion(conv).length} tables)
+                      </span>
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Warnings */}
           {warnings.length > 0 && (
@@ -387,6 +488,14 @@ export default function Results() {
             </Card>
           )}
 
+          {/* Smart Suggestions for table optimization */}
+          {displayTables.length >= 3 && (
+            <SmartSuggestions
+              tables={displayTables}
+              onTablesChange={handleTablesChange}
+            />
+          )}
+
           {/* View Mode Tabs */}
           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as typeof viewMode)}>
             <TabsList>
@@ -408,11 +517,18 @@ export default function Results() {
 
             <TabsContent value="preview" className="mt-4">
               <div className="space-y-4">
-                {extractedTables.map((table, index) => (
+                {displayTables.map((table, index) => (
                   <Card key={index}>
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg">{table.sheetName}</CardTitle>
+                        <div>
+                          <CardTitle className="text-lg">{table.sheetName}</CardTitle>
+                          {isBatchView && table.sourceFile && (
+                            <p className="text-sm text-muted-foreground mt-0.5">
+                              From: {table.sourceFile}
+                            </p>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           <Badge variant="outline">Page {table.pageNumber}</Badge>
                           <Badge
@@ -470,7 +586,7 @@ export default function Results() {
                 <div className="h-[700px] rounded-lg border overflow-hidden">
                   <PreviewContainer
                     pdfFile={null} // Would need stored PDF
-                    extractedSheets={extractedTables}
+                    extractedSheets={displayTables}
                     defaultViewMode="split"
                   />
                 </div>
@@ -480,7 +596,7 @@ export default function Results() {
             <TabsContent value="edit" className="mt-4">
               <div className="h-[600px]">
                 <SpreadsheetEditor
-                  tables={extractedTables}
+                  tables={displayTables}
                   filename={conversion.originalFilename?.replace(/\.[^/.]+$/, '') || 'export'}
                 />
               </div>

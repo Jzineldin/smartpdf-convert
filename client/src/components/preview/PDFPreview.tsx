@@ -46,7 +46,6 @@ export default function PDFPreview({
 
   // Update page input when currentPage changes
   useEffect(() => {
-    console.log('[PDFPreview] currentPage prop changed to:', currentPage);
     setPageInputValue(String(currentPage));
   }, [currentPage]);
 

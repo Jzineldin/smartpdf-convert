@@ -20,6 +20,7 @@ import {
   updateConversion,
   getConversionById,
   getUserConversions,
+  getConversionsByBatchId,
   getAllTemplates,
   getTemplateBySlug,
   seedTemplates,
@@ -31,6 +32,34 @@ import { tablesToExcel, spreadsheetDataToExcel } from "./lib/excel";
 import { createCheckoutSession, createPortalSession, getStripeConfig } from "./lib/stripe";
 import { storagePut } from "./storage";
 import { v4 as uuidv4 } from "uuid";
+
+/**
+ * Smart sheet name truncation that preserves meaningful content
+ * Excel sheet names are limited to 31 characters
+ */
+function smartTruncateSheetName(name: string, suffix: string = ''): string {
+  const maxLength = 31;
+  const availableLength = maxLength - suffix.length;
+
+  if (name.length <= availableLength) {
+    return name + suffix;
+  }
+
+  // Try to truncate at word boundary
+  let truncated = name.substring(0, availableLength);
+
+  // Find the last space to avoid cutting mid-word
+  const lastSpace = truncated.lastIndexOf(' ');
+  if (lastSpace > availableLength * 0.6) {
+    // Only use word boundary if we keep at least 60% of the length
+    truncated = truncated.substring(0, lastSpace);
+  }
+
+  // Remove trailing special characters
+  truncated = truncated.replace(/[\s\-_.,]+$/, '');
+
+  return truncated + suffix;
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -360,8 +389,8 @@ export const appRouter = router({
                   ...table,
                   pageNumber: page.pageNumber,
                   sheetName: pdfConversion.pages.length > 1
-                    ? `${table.sheetName.substring(0, 20)} (P${page.pageNumber})`
-                    : table.sheetName,
+                    ? smartTruncateSheetName(table.sheetName, ` (P${page.pageNumber})`)
+                    : smartTruncateSheetName(table.sheetName),
                 }));
                 allTables.push(...tablesWithPageNum);
                 allWarnings.push(...result.warnings);
@@ -470,6 +499,7 @@ export const appRouter = router({
         anonymousId: z.string().optional(),
         templateId: z.string().default('generic'),
         isSampleDemo: z.boolean().default(false),
+        batchId: z.string().optional(), // For grouping batch uploads
       }))
       .mutation(async ({ ctx, input }) => {
         const ip = ctx.req.headers['x-forwarded-for'] as string || ctx.req.socket?.remoteAddress || '127.0.0.1';
@@ -538,6 +568,7 @@ export const appRouter = router({
           originalFilename: input.fileName,
           fileSizeBytes: input.fileSize,
           status: 'processing',
+          batchId: input.batchId || null,
         });
 
         if (!conversion) {
@@ -707,6 +738,13 @@ export const appRouter = router({
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
         return await getConversionById(input.id);
+      }),
+
+    // Get all conversions in a batch
+    getBatch: publicProcedure
+      .input(z.object({ batchId: z.string() }))
+      .query(async ({ input }) => {
+        return await getConversionsByBatchId(input.batchId);
       }),
 
     // Get user's conversion history

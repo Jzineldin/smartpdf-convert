@@ -1,0 +1,1 @@
+ALTER TABLE "conversions" ADD COLUMN "batch_id" varchar(64);

@@ -21,7 +21,9 @@ import {
   Eye,
   XCircle,
   Loader2,
+  Files,
 } from 'lucide-react';
+import { useMemo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -40,6 +42,53 @@ export default function Dashboard() {
   });
 
   const portalMutation = trpc.stripe.createPortal.useMutation();
+
+  // Group conversions by batchId, showing batch as a single item
+  const groupedConversions = useMemo(() => {
+    if (!conversions) return [];
+
+    const batches = new Map<string | null, typeof conversions>();
+    const result: Array<{
+      type: 'single' | 'batch';
+      conversion: typeof conversions[0];
+      batchConversions?: typeof conversions;
+      batchId?: string;
+    }> = [];
+
+    // Group by batchId
+    for (const conv of conversions) {
+      const batchId = conv.batchId;
+      if (!batchId) {
+        // Single conversion (no batch)
+        result.push({ type: 'single', conversion: conv });
+      } else {
+        // Part of a batch
+        if (!batches.has(batchId)) {
+          batches.set(batchId, []);
+        }
+        batches.get(batchId)!.push(conv);
+      }
+    }
+
+    // Add batch items (only show once per batch, using the first conversion)
+    Array.from(batches.entries()).forEach(([batchId, batchConvs]) => {
+      if (batchId && batchConvs.length > 0) {
+        result.push({
+          type: 'batch',
+          conversion: batchConvs[0],
+          batchConversions: batchConvs,
+          batchId: batchId,
+        });
+      }
+    });
+
+    // Sort by creation date (most recent first)
+    result.sort((a, b) =>
+      new Date(b.conversion.createdAt).getTime() - new Date(a.conversion.createdAt).getTime()
+    );
+
+    return result;
+  }, [conversions]);
 
   const handleManageSubscription = async () => {
     try {
@@ -258,79 +307,105 @@ export default function Dashboard() {
                     </div>
                   ))}
                 </div>
-              ) : conversions && conversions.length > 0 ? (
+              ) : groupedConversions.length > 0 ? (
                 <div className="space-y-4">
-                  {conversions.map((conversion) => (
-                    <div
-                      key={conversion.id}
-                      className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                      onClick={() => setLocation(`/results/${conversion.id}`)}
-                    >
-                      <div className={`w-10 h-10 rounded flex items-center justify-center ${
-                        conversion.status === 'completed'
-                          ? 'bg-blue-100 dark:bg-blue-900/30'
-                          : conversion.status === 'failed'
-                          ? 'bg-red-100 dark:bg-red-900/30'
-                          : 'bg-yellow-100 dark:bg-yellow-900/30'
-                      }`}>
-                        {conversion.status === 'processing' ? (
-                          <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
-                        ) : conversion.status === 'failed' ? (
-                          <XCircle className="h-5 w-5 text-red-600" />
-                        ) : (
-                          <FileText className="h-5 w-5 text-blue-600" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate">{conversion.originalFilename}</p>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <span>{conversion.tableCount || 0} tables</span>
-                          <span>•</span>
-                          <span>
-                            {formatDistanceToNow(new Date(conversion.createdAt), { addSuffix: true })}
-                          </span>
+                  {groupedConversions.map((item) => {
+                    const isBatch = item.type === 'batch';
+                    const totalTables = isBatch
+                      ? item.batchConversions?.reduce((sum, c) => sum + (c.tableCount || 0), 0) || 0
+                      : item.conversion.tableCount || 0;
+                    const fileCount = isBatch ? item.batchConversions?.length || 0 : 1;
+
+                    return (
+                      <div
+                        key={isBatch ? item.batchId : item.conversion.id}
+                        className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                        onClick={() => setLocation(`/results/${item.conversion.id}`)}
+                      >
+                        <div className={`w-10 h-10 rounded flex items-center justify-center ${
+                          item.conversion.status === 'completed' || item.conversion.status === 'review'
+                            ? 'bg-blue-100 dark:bg-blue-900/30'
+                            : item.conversion.status === 'failed'
+                            ? 'bg-red-100 dark:bg-red-900/30'
+                            : 'bg-yellow-100 dark:bg-yellow-900/30'
+                        }`}>
+                          {item.conversion.status === 'processing' ? (
+                            <Loader2 className="h-5 w-5 text-yellow-600 animate-spin" />
+                          ) : item.conversion.status === 'failed' ? (
+                            <XCircle className="h-5 w-5 text-red-600" />
+                          ) : isBatch ? (
+                            <Files className="h-5 w-5 text-blue-600" />
+                          ) : (
+                            <FileText className="h-5 w-5 text-blue-600" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium truncate">
+                              {isBatch ? `Batch: ${fileCount} files` : item.conversion.originalFilename}
+                            </p>
+                            {isBatch && (
+                              <Badge variant="outline" className="font-normal text-xs">
+                                <Files className="h-3 w-3 mr-1" />
+                                Batch
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <span>{totalTables} tables</span>
+                            {isBatch && (
+                              <>
+                                <span>•</span>
+                                <span>{fileCount} files</span>
+                              </>
+                            )}
+                            <span>•</span>
+                            <span>
+                              {formatDistanceToNow(new Date(item.conversion.createdAt), { addSuffix: true })}
+                            </span>
+                          </div>
+                        </div>
+                        <Badge
+                          variant={
+                            item.conversion.status === 'completed' || item.conversion.status === 'review'
+                              ? 'default'
+                              : item.conversion.status === 'failed'
+                              ? 'destructive'
+                              : 'secondary'
+                          }
+                        >
+                          {item.conversion.status === 'review' ? 'completed' : item.conversion.status}
+                        </Badge>
+                        <div className="flex items-center gap-1">
+                          {(item.conversion.status === 'completed' || item.conversion.status === 'review') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLocation(`/results/${item.conversion.id}`);
+                              }}
+                            >
+                              <Eye className="h-4 w-4 mr-1" />
+                              View
+                            </Button>
+                          )}
+                          {item.conversion.xlsxStoragePath && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(item.conversion.xlsxStoragePath!, '_blank');
+                              }}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </div>
-                      <Badge
-                        variant={
-                          conversion.status === 'completed'
-                            ? 'default'
-                            : conversion.status === 'failed'
-                            ? 'destructive'
-                            : 'secondary'
-                        }
-                      >
-                        {conversion.status}
-                      </Badge>
-                      <div className="flex items-center gap-1">
-                        {conversion.status === 'completed' && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setLocation(`/results/${conversion.id}`);
-                            }}
-                          >
-                            <Eye className="h-4 w-4 mr-1" />
-                            View
-                          </Button>
-                        )}
-                        {conversion.xlsxStoragePath && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.open(conversion.xlsxStoragePath!, '_blank');
-                            }}
-                          >
-                            <Download className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12">

@@ -7,8 +7,9 @@ import "@fortune-sheet/react/dist/index.css";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { Button } from '@/components/ui/button';
-import { Download, Copy, Check } from 'lucide-react';
+import { Download, Copy, Check, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
+import { exportToPdf } from '@/lib/exportPdf';
 
 // ConfidenceBreakdown type for detailed confidence info
 interface ConfidenceBreakdown {
@@ -40,6 +41,7 @@ interface SpreadsheetEditorProps {
   tables: ExtractedTable[];
   filename: string;
   onExport?: () => void;
+  showPdfExport?: boolean;
 }
 
 /**
@@ -245,7 +247,7 @@ function copyToClipboard(sheets: SheetData[]) {
   return allText.join('\n\n');
 }
 
-export default function SpreadsheetEditor({ tables, filename, onExport }: SpreadsheetEditorProps) {
+export default function SpreadsheetEditor({ tables, filename, onExport, showPdfExport = true }: SpreadsheetEditorProps) {
   const [data, setData] = useState<SheetData[]>([]);
   const [copied, setCopied] = useState(false);
 
@@ -287,6 +289,16 @@ export default function SpreadsheetEditor({ tables, filename, onExport }: Spread
     }
   }, [data]);
 
+  const handlePdfExport = useCallback(() => {
+    try {
+      exportToPdf(tables, filename);
+      toast.success('PDF file downloaded successfully!');
+    } catch (error) {
+      console.error('PDF export error:', error);
+      toast.error('Failed to export PDF file');
+    }
+  }, [tables, filename]);
+
   if (!data || data.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-muted-foreground">
@@ -321,6 +333,17 @@ export default function SpreadsheetEditor({ tables, filename, onExport }: Spread
               </>
             )}
           </Button>
+          {showPdfExport && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePdfExport}
+              className="gap-2"
+            >
+              <FileDown className="h-4 w-4" />
+              Download PDF
+            </Button>
+          )}
           <Button
             variant="default"
             size="sm"

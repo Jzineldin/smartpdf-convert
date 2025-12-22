@@ -52,6 +52,9 @@ export const conversions = pgTable("conversions", {
   anonymousId: varchar("anonymous_id", { length: 64 }),
   ipAddress: varchar("ip_address", { length: 45 }),
 
+  // Batch grouping - conversions with same batchId were uploaded together
+  batchId: varchar("batch_id", { length: 64 }),
+
   // File info
   originalFilename: varchar("original_filename", { length: 255 }).notNull(),
   fileSizeBytes: integer("file_size_bytes").notNull(),
