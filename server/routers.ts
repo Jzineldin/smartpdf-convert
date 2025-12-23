@@ -4,10 +4,9 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 
-// TESTING_MODE: Set to false before production launch!
-// When true: unlimited conversions, Pro features unlocked for all users
-// When false: enforces usage limits and Pro subscription checks
-const TESTING_MODE = true;
+// TESTING_MODE: Controls whether subscription checks are bypassed
+// Automatically disabled in production, enabled in development
+const TESTING_MODE = process.env.NODE_ENV !== 'production';
 import {
   getUserById,
   updateUserSubscription,
