@@ -44,6 +44,7 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
 // Conversions table for tracking PDF conversions
+// NOTE: Column order must match database for Drizzle ORM to work correctly
 export const conversions = pgTable("conversions", {
   id: serial("id").primaryKey(),
 
@@ -51,9 +52,6 @@ export const conversions = pgTable("conversions", {
   userId: integer("user_id").references(() => users.id),
   anonymousId: varchar("anonymous_id", { length: 64 }),
   ipAddress: varchar("ip_address", { length: 45 }),
-
-  // Batch grouping - conversions with same batchId were uploaded together
-  batchId: varchar("batch_id", { length: 64 }),
 
   // File info
   originalFilename: varchar("original_filename", { length: 255 }).notNull(),
@@ -87,6 +85,9 @@ export const conversions = pgTable("conversions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   expiresAt: timestamp("expires_at"),
+
+  // Batch grouping - conversions with same batchId were uploaded together
+  batchId: varchar("batch_id", { length: 64 }),
 });
 
 export type Conversion = typeof conversions.$inferSelect;
