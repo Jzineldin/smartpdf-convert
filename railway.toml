@@ -1,0 +1,13 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[build.args]
+VITE_SUPABASE_URL = "${{VITE_SUPABASE_URL}}"
+VITE_SUPABASE_ANON_KEY = "${{VITE_SUPABASE_ANON_KEY}}"
+VITE_ANALYTICS_ENDPOINT = "${{VITE_ANALYTICS_ENDPOINT}}"
+VITE_ANALYTICS_WEBSITE_ID = "${{VITE_ANALYTICS_WEBSITE_ID}}"
+
+[deploy]
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
