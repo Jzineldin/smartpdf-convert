@@ -19,8 +19,10 @@ import {
   analyzeTablesForOptimization,
   applyCombineSimilar,
   applyRemoveSmall,
+  previewMerge,
   type ExtractedTable,
   type TableSuggestion,
+  type MergePreview,
 } from '@/lib/tableOptimizer';
 
 interface AppliedChange {
@@ -77,10 +79,14 @@ export default function SmartSuggestions({ tables, onTablesChange }: SmartSugges
     switch (suggestion.type) {
       case 'combine_similar':
       case 'merge_pricing':
-      case 'consolidate_details':
+      case 'consolidate_details': {
+        // Get the preview to know the result name
+        const preview = previewMerge(tables, suggestion.tableIndices);
+        const resultName = preview?.resultName || 'Combined Data';
         newTables = applyCombineSimilar(tables, suggestion.tableIndices);
-        changeDescription = `Merged ${suggestion.tableIndices.length} tables into 1 "Combined Data" table`;
+        changeDescription = `Merged ${suggestion.tableIndices.length} tables into "${resultName}"`;
         break;
+      }
       case 'remove_small':
         newTables = applyRemoveSmall(tables, suggestion.tableIndices);
         changeDescription = `Removed ${suggestion.tableIndices.length} small tables`;
@@ -348,8 +354,8 @@ export default function SmartSuggestions({ tables, onTablesChange }: SmartSugges
 
                       {/* Affected tables preview */}
                       {isPreviewing && (
-                        <div className="mb-3 p-2 bg-white dark:bg-gray-700 rounded border text-xs">
-                          <div className="font-medium mb-2 text-muted-foreground">
+                        <div className="mb-3 p-3 bg-white dark:bg-gray-700 rounded border text-xs space-y-3">
+                          <div className="font-medium text-muted-foreground">
                             Tables that will be {suggestion.type === 'remove_small' ? 'removed' : 'merged'}:
                           </div>
                           <div className="flex flex-wrap gap-1">
@@ -364,12 +370,79 @@ export default function SmartSuggestions({ tables, onTablesChange }: SmartSugges
                               </Badge>
                             )}
                           </div>
-                          {suggestion.type !== 'remove_small' && (
-                            <div className="mt-2 text-muted-foreground">
-                              <ArrowRight className="h-3 w-3 inline mr-1" />
-                              Will create 1 new "Combined Data" table with a "Source" column
-                            </div>
-                          )}
+
+                          {/* Show merge preview for non-remove suggestions */}
+                          {suggestion.type !== 'remove_small' && (() => {
+                            const preview = previewMerge(tables, suggestion.tableIndices);
+                            if (!preview) return null;
+
+                            return (
+                              <div className="border-t pt-3 mt-2">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <ArrowRight className="h-3 w-3 text-blue-500" />
+                                  <span className="font-medium text-blue-600 dark:text-blue-400">
+                                    Result: "{preview.resultName}"
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    ({preview.totalRows} rows)
+                                  </span>
+                                </div>
+
+                                {/* Preview table */}
+                                <div className="overflow-x-auto rounded border bg-gray-50 dark:bg-gray-800">
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="bg-gray-100 dark:bg-gray-700">
+                                        {preview.headers.map((header, i) => (
+                                          <th
+                                            key={i}
+                                            className="px-2 py-1 text-left font-medium border-b truncate max-w-[120px]"
+                                            title={header}
+                                          >
+                                            {header}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {preview.sampleRows.map((row, rowIdx) => (
+                                        <tr
+                                          key={rowIdx}
+                                          className={rowIdx % 2 === 0 ? 'bg-white dark:bg-gray-800' : 'bg-gray-50 dark:bg-gray-750'}
+                                        >
+                                          {row.map((cell, cellIdx) => (
+                                            <td
+                                              key={cellIdx}
+                                              className="px-2 py-1 border-b truncate max-w-[120px]"
+                                              title={cell || ''}
+                                            >
+                                              {cellIdx === 0 ? (
+                                                <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                                  {cell}
+                                                </span>
+                                              ) : (
+                                                cell || <span className="text-gray-400">—</span>
+                                              )}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      ))}
+                                      {preview.totalRows > preview.sampleRows.length && (
+                                        <tr className="bg-gray-100 dark:bg-gray-700">
+                                          <td
+                                            colSpan={preview.headers.length}
+                                            className="px-2 py-1 text-center text-muted-foreground italic"
+                                          >
+                                            ... and {preview.totalRows - preview.sampleRows.length} more rows
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
 

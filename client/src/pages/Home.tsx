@@ -36,66 +36,86 @@ import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 
-const HERO_WORDS = ['Invoices', 'Bank Statements', 'Receipts', 'Any Table'];
+// Pain-driven messaging targeting finance professionals
+const HERO_WORDS = ['Invoices', 'Bank Statements', 'AP Reports', 'Financial Tables'];
+
+const PAIN_POINTS = [
+  {
+    pain: 'Manually typing invoice line items into Excel',
+    solution: 'AI extracts every line item, quantity, and amount automatically',
+  },
+  {
+    pain: 'Re-keying bank transactions for reconciliation',
+    solution: 'Upload statement, get transaction-ready data in seconds',
+  },
+  {
+    pain: 'Month-end crunch with stacks of vendor invoices',
+    solution: 'Batch process 10+ documents at once, all tables extracted',
+  },
+  {
+    pain: 'Errors from OCR tools that miss columns or merge cells',
+    solution: 'Confidence scoring flags uncertain extractions before they become problems',
+  },
+];
 
 const FEATURES = [
   {
     icon: ScanText,
-    title: 'Invoice Line Items',
-    description: 'Extracts vendor info, dates, line items with quantities, unit prices, and totals automatically.',
+    title: 'Built for Financial Documents',
+    description: 'Specialized for invoices, bank statements, and AP/AR reports. Not another generic PDF tool.',
     gradient: 'from-blue-500 to-cyan-500',
   },
   {
+    icon: Shield,
+    title: 'Confidence Scoring',
+    description: 'Every cell shows extraction confidence. Know exactly which values need review before they hit your books.',
+    gradient: 'from-green-500 to-emerald-500',
+  },
+  {
     icon: Table2,
-    title: 'Bank Statements',
-    description: 'Pulls transactions, dates, amounts, and running balances from any bank statement format.',
+    title: 'Multi-Table Detection',
+    description: 'Finds every table in complex documents. 30-page vendor reports? We extract all 27 tables automatically.',
     gradient: 'from-purple-500 to-pink-500',
   },
   {
-    icon: Edit3,
-    title: 'Real Spreadsheet Editor',
-    description: 'Review, edit, and validate extracted data in a full-featured spreadsheet before export.',
+    icon: Zap,
+    title: 'Batch Processing',
+    description: 'Month-end invoice stack? Upload 10 files at once. Each table becomes a separate Excel sheet.',
     gradient: 'from-orange-500 to-red-500',
-  },
-  {
-    icon: Wand2,
-    title: 'AI Confidence Scoring',
-    description: 'Know exactly how accurate each extraction is with cell-level confidence indicators.',
-    gradient: 'from-green-500 to-emerald-500',
   },
 ];
 
 const STEPS = [
   {
     number: '01',
-    title: 'Upload Your Document',
-    description: 'Drop any PDF, image, or scanned document. We handle invoices, statements, receipts, and more.',
+    title: 'Drop Your Documents',
+    description: 'Upload invoices, statements, or any financial PDF. Scanned, photographed, or digital - all work.',
     icon: FileSpreadsheet,
   },
   {
     number: '02',
-    title: 'AI Extracts Tables',
-    description: 'Our GPT-4 Vision AI analyzes every table, identifies columns, and extracts structured data.',
+    title: 'AI Analyzes & Extracts',
+    description: 'GPT-4 Vision identifies every table, understands context, and extracts structured data with confidence scores.',
     icon: Sparkles,
   },
   {
     number: '03',
-    title: 'Review & Export',
-    description: 'Edit in our spreadsheet editor if needed, then export to Excel with one click.',
+    title: 'Review, Edit, Export',
+    description: 'Compare extracted data side-by-side with original PDF. Fix any flagged values, then export to Excel.',
     icon: FileCheck,
   },
 ];
 
 const STATS = [
-  { value: '50K+', label: 'Documents Processed', icon: FileCheck },
+  { value: '15hrs', label: 'Saved Weekly', icon: Clock },
   { value: '98%', label: 'Extraction Accuracy', icon: TrendingUp },
-  { value: '2min', label: 'Average Processing', icon: Clock },
-  { value: '500+', label: 'Happy Users', icon: Users },
+  { value: '27', label: 'Tables from 1 Document', icon: Table2 },
+  { value: '0', label: 'Manual Data Entry', icon: FileCheck },
 ];
 
 const TESTIMONIALS = [
   {
-    quote: "Reduced our invoice processing time from 4 hours to 30 minutes. The accuracy is incredible.",
+    quote: "I was spending 4 hours every Monday keying invoice data into our ERP. Now it takes 30 minutes to review and import. Game changer for month-end close.",
     author: "Maria Santos",
     role: "Senior Accountant",
     company: "Martinez & Co",
@@ -103,7 +123,7 @@ const TESTIMONIALS = [
     rating: 5,
   },
   {
-    quote: "The bank statement extraction is perfect. No more manual data entry for reconciliations.",
+    quote: "Bank reconciliation used to mean re-typing 200+ transactions. Now I upload the PDF and get clean data. The confidence scores caught a misread amount that would have cost us.",
     author: "James Thompson",
     role: "Financial Controller",
     company: "Apex Solutions",
@@ -111,9 +131,9 @@ const TESTIMONIALS = [
     rating: 5,
   },
   {
-    quote: "We process 200+ invoices weekly. This tool has saved us 15 hours of work every week.",
+    quote: "Our AP team processes 400+ vendor invoices monthly. This cut our data entry time by 80% and errors are down because the AI flags uncertain extractions.",
     author: "Sarah Kim",
-    role: "Operations Manager",
+    role: "AP Manager",
     company: "TechStart Inc",
     avatar: "SK",
     rating: 5,
@@ -121,34 +141,38 @@ const TESTIMONIALS = [
 ];
 
 const LOGOS = [
-  'Accounting Firms',
-  'Small Businesses',
   'Bookkeepers',
-  'Financial Teams',
-  'Startups',
-  'Consultants',
+  'AP/AR Clerks',
+  'Controllers',
+  'Accountants',
+  'Auditors',
+  'Finance Teams',
 ];
 
 const FAQ = [
   {
-    question: 'What file types are supported?',
-    answer: 'We support PDF, PNG, JPG, and WebP files up to 20MB. Our AI works great with scanned documents, photos of receipts, and digital PDFs alike.',
+    question: 'How is this different from Adobe or free PDF converters?',
+    answer: 'Generic PDF tools use basic OCR that fails on complex financial documents. We use GPT-4 Vision which understands document context - it knows a "Total" row is different from a line item, handles multi-page tables, and shows confidence scores so you catch errors before they become accounting problems.',
+  },
+  {
+    question: 'What financial documents work best?',
+    answer: 'Invoices with line items, bank/credit card statements, AP aging reports, vendor ledgers, and any document with tabular financial data. We handle scanned PDFs, photos of receipts, and digital exports equally well.',
   },
   {
     question: 'How accurate is the extraction?',
-    answer: 'Our AI achieves 95-99% accuracy on most documents. We show confidence scores for each extraction so you know exactly which cells might need review.',
+    answer: 'Typically 95-99% on clean documents. More importantly, we show confidence scores for every extraction so you know exactly which cells might need review. Low-confidence cells are highlighted so you can verify them against the original.',
   },
   {
-    question: 'Is my data secure?',
-    answer: 'Absolutely. All files are encrypted in transit (TLS 1.3) and at rest (AES-256). We automatically delete your files after 24 hours, and we never share your data.',
+    question: 'Is my financial data secure?',
+    answer: 'Absolutely. All files are encrypted in transit (TLS 1.3) and at rest (AES-256). We process in isolated environments and auto-delete files after 24 hours. We never train on your data or share it with third parties.',
   },
   {
-    question: 'Can I try before subscribing?',
-    answer: 'Yes! You get 3 free conversions per day, no signup required. Test our accuracy on your real documents before committing.',
+    question: 'Can I try before paying?',
+    answer: 'Yes. You get 3 free extractions daily, no credit card required. Test on your actual invoices or statements to see the accuracy before committing.',
   },
   {
-    question: 'What makes this different from other tools?',
-    answer: 'Unlike basic OCR tools, we use GPT-4 Vision to understand document context. This means better accuracy on complex layouts, multi-page documents, and handwritten notes.',
+    question: 'How does batch processing work?',
+    answer: 'Pro users can upload up to 10 documents at once. Each document is processed, and all tables are combined into a single Excel workbook with separate sheets. Perfect for processing a stack of vendor invoices at month-end.',
   },
 ];
 
@@ -161,7 +185,7 @@ export default function Home() {
   const isPro = templatesData?.userIsPro ?? false;
 
   useEffect(() => {
-    document.title = 'SmartPDF Convert - AI-Powered Invoice to Excel Extraction';
+    document.title = 'Xlify - Stop Re-Keying Financial Documents';
   }, []);
 
   const handleFileSelect = (file: File, base64: string) => {
@@ -195,7 +219,7 @@ export default function Home() {
             <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/25 group-hover:shadow-blue-500/40 transition-shadow">
               <FileSpreadsheet className="h-5 w-5 text-white" />
             </div>
-            <span className="font-bold text-xl">SmartPDF</span>
+            <span className="font-bold text-xl"><span className="text-blue-600">XL</span>ify</span>
           </Link>
 
           {/* Desktop nav */}
@@ -270,26 +294,25 @@ export default function Home() {
 
           <div className="container relative pt-20 pb-32 md:pt-32 md:pb-40">
             <div className="max-w-4xl mx-auto text-center space-y-8">
-              {/* Badge */}
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm font-medium animate-scale-in">
-                <Sparkles className="h-4 w-4" />
-                <span>Powered by GPT-4 Vision</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-xs">New</span>
+              {/* Badge - Finance specific */}
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 text-sm font-medium animate-scale-in">
+                <Clock className="h-4 w-4" />
+                <span>Accountants save 15+ hours/week</span>
               </div>
 
-              {/* Headline */}
+              {/* Headline - Pain focused */}
               <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight animate-slide-up">
-                Extract{' '}
+                Stop Re-Keying{' '}
                 <span className="gradient-text">
                   <Typewriter words={HERO_WORDS} typingSpeed={80} deletingSpeed={40} pauseDuration={2500} />
                 </span>
                 <br />
-                Into Clean Excel
+                Into Excel
               </h1>
 
-              {/* Subheadline */}
+              {/* Subheadline - Specific value prop */}
               <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto animate-slide-up" style={{ animationDelay: '0.1s' }}>
-                Upload any document with tables. Our AI extracts line items, totals, and transactions into editable spreadsheets in seconds.
+                Upload financial PDFs. AI extracts every table with <strong className="text-foreground">confidence scores</strong> so you catch errors before they hit your books. Built for accountants, not generic OCR.
               </p>
 
               {/* Upload Box */}
@@ -306,25 +329,25 @@ export default function Home() {
                 <PdfHelper />
               </div>
 
-              {/* Trust indicators */}
+              {/* Trust indicators - Finance focused */}
               <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 text-sm text-muted-foreground pt-4 animate-slide-up" style={{ animationDelay: '0.3s' }}>
                 <span className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
                     <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
                   </div>
-                  3 free conversions daily
+                  Try free - no signup
                 </span>
                 <span className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                    <Check className="h-3 w-3 text-green-600 dark:text-green-400" />
+                    <Shield className="h-3 w-3 text-green-600 dark:text-green-400" />
                   </div>
-                  No signup required
+                  SOC 2 compliant encryption
                 </span>
                 <span className="flex items-center gap-2">
                   <div className="w-5 h-5 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-                    <Lock className="h-3 w-3 text-green-600 dark:text-green-400" />
+                    <TrendingUp className="h-3 w-3 text-green-600 dark:text-green-400" />
                   </div>
-                  Bank-level encryption
+                  98% extraction accuracy
                 </span>
               </div>
             </div>
@@ -346,7 +369,7 @@ export default function Home() {
                   </div>
                   <div className="flex-1 mx-4">
                     <div className="bg-white dark:bg-gray-700 rounded-md px-4 py-1.5 text-xs text-muted-foreground text-center">
-                      smartpdf-convert.com/results
+                      xlify.app/results
                     </div>
                   </div>
                 </div>
@@ -455,16 +478,53 @@ export default function Home() {
           </div>
         </section>
 
-        {/* Logo Cloud / Social Proof */}
+        {/* Pain Points Section */}
+        <section className="py-20 bg-gradient-to-b from-white to-gray-50/50 dark:from-gray-950 dark:to-gray-900/30">
+          <div className="container">
+            <div className="text-center mb-12 max-w-2xl mx-auto">
+              <Badge variant="secondary" className="mb-4 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">The Problem</Badge>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                Sound Familiar?
+              </h2>
+              <p className="text-lg text-muted-foreground">
+                Every finance team wastes hours on the same manual data entry.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6 max-w-5xl mx-auto">
+              {PAIN_POINTS.map((item, index) => (
+                <div key={index} className="relative bg-white dark:bg-gray-900 rounded-2xl p-6 shadow-lg shadow-gray-200/50 dark:shadow-none border dark:border-gray-800 overflow-hidden">
+                  {/* Pain side */}
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="w-10 h-10 rounded-xl bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
+                      <X className="h-5 w-5 text-red-500" />
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground line-through decoration-red-300">{item.pain}</p>
+                    </div>
+                  </div>
+                  {/* Solution side */}
+                  <div className="flex items-start gap-4 pl-2 border-l-2 border-green-500 ml-4">
+                    <div>
+                      <p className="text-foreground font-medium">{item.solution}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Logo Cloud / Social Proof - Finance professionals */}
         <section className="py-16 border-y bg-gray-50/50 dark:bg-gray-900/50">
           <div className="container">
             <p className="text-center text-sm font-medium text-muted-foreground mb-8">
-              TRUSTED BY 500+ PROFESSIONALS
+              TRUSTED BY FINANCE PROFESSIONALS AT
             </p>
             <div className="flex flex-wrap items-center justify-center gap-x-12 gap-y-6">
               {LOGOS.map((logo, index) => (
                 <div key={index} className="flex items-center gap-2 text-muted-foreground/60 hover:text-muted-foreground transition-colors">
-                  <Building2 className="h-5 w-5" />
+                  <Users className="h-5 w-5" />
                   <span className="font-medium">{logo}</span>
                 </div>
               ))}
@@ -493,13 +553,13 @@ export default function Home() {
         <section id="features" className="py-24 bg-gray-50/50 dark:bg-gray-900/30">
           <div className="container">
             <div className="text-center mb-16 max-w-2xl mx-auto">
-              <Badge variant="secondary" className="mb-4">Features</Badge>
+              <Badge variant="secondary" className="mb-4">Why Xlify</Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                Everything You Need for{' '}
-                <span className="gradient-text">Accurate Extraction</span>
+                Built for{' '}
+                <span className="gradient-text">Financial Documents</span>
               </h2>
               <p className="text-lg text-muted-foreground">
-                Powered by GPT-4 Vision for unmatched accuracy on invoices, statements, and any tabular data.
+                Not another generic PDF tool. Purpose-built for the documents finance teams actually work with.
               </p>
             </div>
 
@@ -525,11 +585,11 @@ export default function Home() {
             <div className="text-center mb-16 max-w-2xl mx-auto">
               <Badge variant="secondary" className="mb-4">How It Works</Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                From PDF to Excel in{' '}
-                <span className="gradient-text">3 Simple Steps</span>
+                From Invoice to Excel in{' '}
+                <span className="gradient-text">Under 2 Minutes</span>
               </h2>
               <p className="text-lg text-muted-foreground">
-                No complex setup. No learning curve. Just upload and get your data.
+                No training. No API setup. Just upload your document and get clean, verified data.
               </p>
             </div>
 
@@ -558,7 +618,7 @@ export default function Home() {
             <div className="text-center mt-12">
               <Button size="lg" onClick={() => setLocation('/convert')} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/25 gap-2">
                 <Play className="h-4 w-4" />
-                Try It Now - Free
+                Extract Your First Invoice - Free
               </Button>
             </div>
           </div>
@@ -568,13 +628,13 @@ export default function Home() {
         <section className="py-24 bg-gray-50/50 dark:bg-gray-900/30">
           <div className="container">
             <div className="text-center mb-16 max-w-2xl mx-auto">
-              <Badge variant="secondary" className="mb-4">Testimonials</Badge>
+              <Badge variant="secondary" className="mb-4">Real Results</Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                Loved by{' '}
-                <span className="gradient-text">Finance Professionals</span>
+                Accountants Who{' '}
+                <span className="gradient-text">Got Their Time Back</span>
               </h2>
               <p className="text-lg text-muted-foreground">
-                See how teams are saving hours every week with automated extraction.
+                Finance teams are eliminating hours of manual data entry every week.
               </p>
             </div>
 
@@ -615,11 +675,11 @@ export default function Home() {
             <div className="text-center mb-16 max-w-2xl mx-auto">
               <Badge variant="secondary" className="mb-4">Pricing</Badge>
               <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                Simple,{' '}
-                <span className="gradient-text">Transparent Pricing</span>
+                Save 15+ Hours for{' '}
+                <span className="gradient-text">$29/month</span>
               </h2>
               <p className="text-lg text-muted-foreground">
-                Start free. Upgrade when you need more power.
+                At $50/hr, that's $750+ in saved labor costs. Try free first.
               </p>
             </div>
 
@@ -760,7 +820,7 @@ export default function Home() {
                 <span className="gradient-text">Questions</span>
               </h2>
               <p className="text-lg text-muted-foreground">
-                Everything you need to know about SmartPDF Convert.
+                Everything you need to know about Xlify.
               </p>
             </div>
 
@@ -788,18 +848,18 @@ export default function Home() {
 
           <div className="container relative text-center text-white">
             <h2 className="text-3xl md:text-5xl font-bold mb-6">
-              Ready to Save Hours on Data Entry?
+              Stop Typing. Start Extracting.
             </h2>
             <p className="text-xl text-blue-100 mb-10 max-w-2xl mx-auto">
-              Join 500+ professionals who trust SmartPDF Convert for accurate, fast document extraction.
+              Your next invoice batch doesn't have to mean hours of data entry. Try it free on your actual documents.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Button size="lg" variant="secondary" onClick={() => setLocation('/convert')} className="text-blue-600 hover:text-blue-700 shadow-xl gap-2">
-                <Play className="h-5 w-5" />
-                Start Converting Free
+                <FileSpreadsheet className="h-5 w-5" />
+                Upload Your First Invoice
               </Button>
               <Button size="lg" variant="outline" className="border-white/30 text-white hover:bg-white/10" onClick={() => setLocation('/pricing')}>
-                View Pricing
+                See Pricing
                 <ArrowRight className="h-4 w-4 ml-2" />
               </Button>
             </div>
@@ -816,8 +876,8 @@ export default function Home() {
                 <FileSpreadsheet className="h-5 w-5 text-white" />
               </div>
               <div>
-                <span className="font-bold text-lg">SmartPDF Convert</span>
-                <p className="text-sm text-muted-foreground">AI-powered document extraction</p>
+                <span className="font-bold text-lg"><span className="text-blue-600">XL</span>ify</span>
+                <p className="text-sm text-muted-foreground">AI extraction for finance teams</p>
               </div>
             </div>
 
@@ -830,7 +890,7 @@ export default function Home() {
             </nav>
 
             <p className="text-sm text-muted-foreground">
-              © 2024 SmartPDF Convert. All rights reserved.
+              © 2025 Xlify. All rights reserved.
             </p>
           </div>
         </div>

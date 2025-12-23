@@ -191,6 +191,7 @@ export const appRouter = router({
           let imageBase64: string | string[] = input.fileBase64;
           let imageMimeType = input.mimeType;
           let pageNumbers: number[] = [1];
+          let documentTotalPages = 1; // Track total pages for the document
 
           if (input.mimeType === 'application/pdf') {
             // First, get total page count
@@ -203,6 +204,7 @@ export const appRouter = router({
             }
 
             const totalPages = pdfConversion.totalPages;
+            documentTotalPages = totalPages;
 
             // Calculate sample pages to analyze
             // For 2-page document: pages 1, 2 (ALL pages)
@@ -277,8 +279,8 @@ export const appRouter = router({
             pageNumbers = pagesToAnalyze;
           }
 
-          console.log('Calling analyzeDocument for:', input.fileName);
-          const analysis = await analyzeDocument(imageBase64, input.fileName, imageMimeType, pageNumbers);
+          console.log('Calling analyzeDocument for:', input.fileName, 'totalPages:', documentTotalPages);
+          const analysis = await analyzeDocument(imageBase64, input.fileName, imageMimeType, pageNumbers, documentTotalPages);
           console.log('Analysis result:', JSON.stringify(analysis, null, 2).substring(0, 500));
           return {
             success: true,

@@ -181,6 +181,15 @@ const ANALYSIS_PROMPT = `You are a document analysis AI. Your job is to analyze 
 IMPORTANT: DO NOT extract data yet. Only analyze and generate questions.
 NOTE: You may be shown SAMPLE PAGES from a multi-page document (not all pages). Look for patterns that might appear throughout.
 
+SAMPLE PAGE ESTIMATION:
+If you're shown sample pages (e.g., pages 1, 3, 5 of a 9-page document), you MUST:
+1. Count tables on the pages you can see
+2. ESTIMATE total tables for the ENTIRE document based on patterns observed
+3. If each sample page has ~3 tables and the doc has 9 pages, estimate ~25-27 total tables
+4. Report the ESTIMATED TOTAL in "tablesDetected", not just what you see on sample pages
+5. In "detectedTables", include entries for tables you CAN see on sample pages
+6. Add "estimatedTotal" field if you're extrapolating from samples
+
 ANALYZE THE DOCUMENT FOR:
 1. Document type (invoice, report, spreadsheet, form, ID, contract, receipt, etc.)
 2. Number of tables and structured data sections
@@ -209,16 +218,31 @@ COLUMN COUNTING:
 
 Example: A competitive analysis with sections for 6 different competitors = 6+ tables, NOT 1
 
-DETECTED TABLES PREVIEW:
-For EACH table you detect, provide:
-- name: A descriptive name for the table (e.g., "Invoice Items", "Transaction History")
+DETECTED TABLES - INDIVIDUAL ENTRIES REQUIRED:
+The "detectedTables" array MUST contain ONE ENTRY PER TABLE. DO NOT group or consolidate!
+
+WRONG (grouping tables into categories):
+- "Competitor Comparison" containing data from 5 different competitors = WRONG
+- "Features Overview" combining all feature tables = WRONG
+- "Indirekta konkurrenter" as one entry when there are 5 competitor tables = WRONG
+
+CORRECT (one entry per table):
+- "Canva Overview" (page 2), "Jasper AI Overview" (page 3), "NovelAI Overview" (page 4) = 3 separate entries
+- Each bordered/structured section with its own header = separate entry
+- Each competitor section = separate entry, even if they have similar columns
+
+For EACH table you detect, provide an entry with:
+- name: UNIQUE descriptive name (e.g., "Canva Features", "Jasper AI Pricing")
 - pageNumber: Which page the table is on
 - rowCount: Estimated number of data rows (excluding header)
 - columnCount: EXACT number of columns (count ALL columns!)
 - headers: The ACTUAL column headers from the document (extract the real text)
 - previewRows: First 2-3 rows of ACTUAL data from the table (extract the real values)
 
-CRITICAL: Extract REAL data from the document for headers and previewRows, not placeholders!
+CRITICAL:
+- Extract REAL data from the document for headers and previewRows, not placeholders!
+- The LENGTH of detectedTables array MUST equal tablesDetected number!
+- If you report tablesDetected: 12, then detectedTables MUST have 12 entries!
 === END TABLE COUNTING RULES ===
 
 === PROACTIVE QUESTIONS - ALWAYS ASK IF PATTERNS DETECTED ===
@@ -1282,8 +1306,8 @@ async function callOpenRouter(
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://smartpdf-convert.com',
-        'X-Title': 'SmartPDF Convert',
+        'HTTP-Referer': 'https://xlify.app',
+        'X-Title': 'Xlify',
       },
       signal: controller.signal,
       body: JSON.stringify({
@@ -1353,7 +1377,8 @@ export async function analyzeDocument(
   fileBase64: string | string[],
   fileName: string,
   mimeType: string,
-  pageNumbers?: number[]
+  pageNumbers?: number[],
+  totalPageCount?: number
 ): Promise<DocumentAnalysis> {
   if (!GOOGLE_AI_API_KEY && !OPENROUTER_API_KEY) {
     throw new Error('No AI API key configured');
@@ -1362,12 +1387,13 @@ export async function analyzeDocument(
   // Handle single image or array of images
   const images = Array.isArray(fileBase64) ? fileBase64 : [fileBase64];
   const pages = pageNumbers || [1];
+  const totalPages = totalPageCount || pages.length;
 
-  console.log(`Analyzing document: ${fileName} (${images.length} sample page(s): ${pages.join(', ')})`);
+  console.log(`Analyzing document: ${fileName} (${images.length} sample page(s): ${pages.join(', ')}, total pages: ${totalPages})`);
 
   // For multi-page analysis, we need to use Google AI's multi-image capability
   if (USE_GOOGLE_AI && images.length > 1) {
-    const result = await callGoogleAIMultiImage(images, mimeType, fileName, pages);
+    const result = await callGoogleAIMultiImage(images, mimeType, fileName, pages, totalPages);
     if (!result.success) {
       throw new Error(result.error || 'Failed to analyze document');
     }
@@ -1425,7 +1451,8 @@ async function callGoogleAIMultiImage(
   images: string[],
   mimeType: string,
   fileName: string,
-  pageNumbers: number[]
+  pageNumbers: number[],
+  totalPageCount: number
 ): Promise<{ success: boolean; content?: string; error?: string }> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for multi-image
@@ -1439,12 +1466,30 @@ async function callGoogleAIMultiImage(
     // Add text prompt first
     const pageInfo = pageNumbers.map((p, i) => `Image ${i + 1} = Page ${p}`).join(', ');
     const totalPagesShown = images.length;
+    const isSampling = totalPageCount > totalPagesShown;
+
+    const samplingNote = isSampling
+      ? `\n\nIMPORTANT SAMPLING CONTEXT:
+You are viewing ${totalPagesShown} SAMPLE pages from a ${totalPageCount}-page document.
+- Pages shown: ${pageNumbers.join(', ')} (out of ${totalPageCount} total)
+- You MUST ESTIMATE the total tables for the ENTIRE document, not just what you see
+- If sample pages average 3 tables each, estimate ${totalPageCount} pages × 3 = ~${totalPageCount * 3} total tables
+- Report your ESTIMATED TOTAL in "tablesDetected"
+- Include "tablesOnSamplePages" with the count of tables you can actually see
+- In "detectedTables", include entries for tables visible on sample pages (with real data)
+- Add a note in analysis if you're extrapolating from samples`
+      : '';
+
     parts.push({
-      text: `${ANALYSIS_PROMPT}\n\nAnalyze these ${totalPagesShown} pages from document "${fileName}" and generate clarifying questions.\n${pageInfo}\n\nCRITICAL REQUIREMENTS:
+      text: `${ANALYSIS_PROMPT}\n\nAnalyze these ${totalPagesShown} pages from document "${fileName}" and generate clarifying questions.\n${pageInfo}${samplingNote}\n\nCRITICAL REQUIREMENTS:
 1. Count tables on EACH page and SUM them for "tablesDetected". If Page 1 has 3 tables and Page 2 has 2 tables, report tablesDetected: 5.
-2. You MUST include the "detectedTables" array with ACTUAL table data extracted from the document.
-3. For each table, provide the REAL column headers and 2-3 REAL preview rows of data.
-4. Count ALL columns accurately - if a table has 8 columns, report columnCount: 8.
+2. ${isSampling ? 'ESTIMATE total tables for ALL ' + totalPageCount + ' pages based on patterns in sample pages.' : 'Count ALL tables visible.'}
+3. You MUST include the "detectedTables" array with ONE ENTRY PER TABLE - NO GROUPING!
+4. Each table entry needs a UNIQUE name (e.g., "Competitor A Features", "Competitor B Features" - NOT "Competitors" for all of them).
+5. For each table, provide the REAL column headers and 2-3 REAL preview rows of data.
+6. Count ALL columns accurately - if a table has 8 columns, report columnCount: 8.
+7. ${isSampling ? 'detectedTables should include tables from SAMPLE pages. tablesDetected should be the ESTIMATED TOTAL.' : 'The LENGTH of detectedTables MUST EQUAL tablesDetected.'}
+8. DO NOT group similar tables - if there are 5 competitor analysis sections, create 5 separate entries.
 
 Return valid JSON only, no markdown.`
     });

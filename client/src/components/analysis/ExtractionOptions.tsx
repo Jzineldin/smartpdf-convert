@@ -387,7 +387,20 @@ export default function ExtractionOptions({
       {/* 2. Tables Found Card */}
       <Card className="border-gray-200 dark:border-gray-700">
         <CardContent className="p-5">
-          <h3 className="font-medium mb-4">Tables Found</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-medium">Tables Found</h3>
+            {detectedTables.length < analysisData.tablesDetected && (
+              <span className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded">
+                Showing {detectedTables.length} preview tables • {analysisData.tablesDetected} total estimated
+              </span>
+            )}
+          </div>
+
+          {detectedTables.length < analysisData.tablesDetected && (
+            <p className="text-xs text-muted-foreground mb-3 pb-3 border-b">
+              These are sample tables from analyzed pages. All {analysisData.tablesDetected} tables will be extracted from the full document.
+            </p>
+          )}
 
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {detectedTables.map((table, index) => (

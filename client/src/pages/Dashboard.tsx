@@ -134,7 +134,7 @@ export default function Dashboard() {
         <div className="container py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <FileSpreadsheet className="h-6 w-6 text-blue-600" />
-            <span className="font-bold text-lg">SmartPDF Convert</span>
+            <span className="font-bold text-lg"><span className="text-blue-600">XL</span>ify</span>
           </Link>
           
           <div className="flex items-center gap-4">

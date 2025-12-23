@@ -116,7 +116,7 @@ export default function Pricing() {
         <div className="container py-4 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
             <FileSpreadsheet className="h-6 w-6 text-blue-600" />
-            <span className="font-bold text-lg">SmartPDF Convert</span>
+            <span className="font-bold text-lg"><span className="text-blue-600">XL</span>ify</span>
           </Link>
           
           <div className="flex items-center gap-4">
@@ -252,7 +252,7 @@ export default function Pricing() {
       {/* Footer */}
       <footer className="border-t py-8 mt-16">
         <div className="container text-center text-sm text-muted-foreground">
-          <p>© 2024 SmartPDF Convert. All rights reserved.</p>
+          <p>© 2025 Xlify. All rights reserved.</p>
         </div>
       </footer>
     </div>

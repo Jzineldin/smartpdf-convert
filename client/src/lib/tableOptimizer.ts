@@ -327,6 +327,61 @@ export function analyzeTablesForOptimization(tables: ExtractedTable[]): Analysis
 }
 
 /**
+ * Generate a smart name for the combined table based on source tables
+ */
+function generateCombinedTableName(tables: ExtractedTable[]): string {
+  // Extract base names without page suffixes
+  const baseNames = tables.map(t =>
+    t.sheetName
+      .replace(/\s*\(P\d+\)\s*$/i, '')
+      .replace(/\s*Page\s*\d+\s*$/i, '')
+      .trim()
+  );
+
+  // Find common prefix or pattern
+  const uniqueNames = Array.from(new Set(baseNames));
+
+  // If all tables have the same base name, use it
+  if (uniqueNames.length === 1) {
+    const name = uniqueNames[0];
+    return name.length > 25 ? name.substring(0, 22) + '...' : name;
+  }
+
+  // Check for common patterns in names
+  const firstWords = uniqueNames.map(n => n.split(/\s+/)[0]);
+  const uniqueFirstWords = Array.from(new Set(firstWords));
+
+  // If many tables share the same first word, use that as category
+  if (uniqueFirstWords.length === 1 && uniqueFirstWords[0].length > 2) {
+    return `All ${uniqueFirstWords[0]}`;
+  }
+
+  // Check headers for clues
+  const firstTable = tables[0];
+  if (firstTable.headers.length === 2) {
+    // Key-value structure - name based on header pattern
+    const h1 = firstTable.headers[0].toLowerCase();
+    const h2 = firstTable.headers[1].toLowerCase();
+
+    if (h1.includes('aspekt') || h2.includes('detalj')) {
+      return 'Competitor Details';
+    }
+    if (h1.includes('tier') || h1.includes('plan') || h2.includes('pris') || h2.includes('price')) {
+      return 'Pricing Comparison';
+    }
+    if (h1.includes('feature') || h1.includes('funktion')) {
+      return 'Feature Comparison';
+    }
+  }
+
+  // Default: describe what was combined
+  if (tables.length <= 3) {
+    return `Combined (${tables.length})`;
+  }
+  return `Combined Data (${tables.length} tables)`;
+}
+
+/**
  * Apply a "combine similar" suggestion - merge tables with same structure
  */
 export function applyCombineSimilar(
@@ -347,16 +402,21 @@ export function applyCombineSimilar(
     // Extract a short source name from sheetName
     const sourceName = table.sheetName
       .replace(/\s*\(P\d+\)\s*$/, '') // Remove page suffix
-      .substring(0, 20);
+      .replace(/\s*Page\s*\d+\s*$/i, '')
+      .trim()
+      .substring(0, 25);
 
     for (const row of table.rows) {
       newRows.push([sourceName, ...row]);
     }
   }
 
+  // Generate smart name for the combined table
+  const combinedName = generateCombinedTableName(tablesToMerge);
+
   // Create the merged table
   const mergedTable: ExtractedTable = {
-    sheetName: 'Combined Data',
+    sheetName: combinedName,
     headers: newHeaders,
     rows: newRows,
     pageNumber: firstTable.pageNumber,
@@ -405,4 +465,68 @@ export function getSuggestionSummary(suggestion: TableSuggestion, tables: Extrac
   }
 
   return `Affects: ${affectedNames.join(', ')}`;
+}
+
+/**
+ * Preview what a merged table will look like without actually applying the change
+ */
+export interface MergePreview {
+  resultName: string;
+  headers: string[];
+  sampleRows: (string | null)[][];
+  totalRows: number;
+  sourceTables: string[];
+}
+
+export function previewMerge(
+  tables: ExtractedTable[],
+  tableIndices: number[]
+): MergePreview | null {
+  if (tableIndices.length < 2) return null;
+
+  const tablesToMerge = tableIndices.map(i => tables[i]).filter(Boolean);
+  if (tablesToMerge.length < 2) return null;
+
+  const firstTable = tablesToMerge[0];
+
+  // Generate the result name
+  const resultName = generateCombinedTableName(tablesToMerge);
+
+  // Create preview headers
+  const headers = ['Source', ...firstTable.headers];
+
+  // Get sample rows (first 2 from each table, max 6 total)
+  const sampleRows: (string | null)[][] = [];
+  const maxSamplesPerTable = Math.max(1, Math.floor(6 / tablesToMerge.length));
+
+  for (const table of tablesToMerge) {
+    const sourceName = table.sheetName
+      .replace(/\s*\(P\d+\)\s*$/, '')
+      .replace(/\s*Page\s*\d+\s*$/i, '')
+      .trim()
+      .substring(0, 25);
+
+    const rowsToTake = Math.min(maxSamplesPerTable, table.rows.length);
+    for (let i = 0; i < rowsToTake; i++) {
+      sampleRows.push([sourceName, ...table.rows[i]]);
+      if (sampleRows.length >= 6) break;
+    }
+    if (sampleRows.length >= 6) break;
+  }
+
+  // Calculate total rows
+  const totalRows = tablesToMerge.reduce((sum, t) => sum + t.rows.length, 0);
+
+  // Source table names
+  const sourceTables = tablesToMerge.map(t =>
+    t.sheetName.replace(/\s*\(P\d+\)\s*$/, '').trim()
+  );
+
+  return {
+    resultName,
+    headers,
+    sampleRows,
+    totalRows,
+    sourceTables,
+  };
 }

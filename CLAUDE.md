@@ -1,8 +1,8 @@
-# SmartPDF Convert - Project Context for Claude
+# Xlify - Project Context for Claude
 
 ## Project Overview
 
-SmartPDF Convert is an AI-powered SaaS application that extracts tabular data from PDF documents and images, converting them into editable Excel spreadsheets. The product targets financial professionals, accountants, and businesses who need accurate extraction of invoices, bank statements, receipts, and other structured documents.
+Xlify (xlify.app) is an AI-powered SaaS application that extracts tabular data from PDF documents and images, converting them into editable Excel spreadsheets. The product targets financial professionals, accountants, and businesses who need accurate extraction of invoices, bank statements, receipts, and other structured documents.
 
 ### Business Model
 - **Free Tier**: 3 conversions/day with generic template
@@ -10,7 +10,7 @@ SmartPDF Convert is an AI-powered SaaS application that extracts tabular data fr
 - **Target Market**: Accountants, bookkeepers, small businesses, financial analysts
 
 ### Strategic Focus
-The product differentiates through **accuracy-first positioning** in the financial document vertical, where errors have real consequences. Unlike generic PDF tools that claim "AI-powered" extraction, SmartPDF Convert provides:
+The product differentiates through **accuracy-first positioning** in the financial document vertical, where errors have real consequences. Unlike generic PDF tools that claim "AI-powered" extraction, Xlify provides:
 - Confidence scoring to flag uncertain extractions
 - Specialized templates optimized for financial documents
 - Batch processing for month-end reconciliation workflows

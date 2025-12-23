@@ -55,7 +55,7 @@ export default function Login() {
         <CardHeader className="space-y-1 text-center">
           <Link href="/" className="flex items-center justify-center gap-2 mb-4">
             <FileSpreadsheet className="h-8 w-8 text-blue-600" />
-            <span className="text-xl font-bold">SmartPDF Convert</span>
+            <span className="text-xl font-bold"><span className="text-blue-600">XL</span>ify</span>
           </Link>
           <CardTitle className="text-2xl">Welcome back</CardTitle>
           <CardDescription>Sign in to your account to continue</CardDescription>

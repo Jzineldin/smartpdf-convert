@@ -379,8 +379,8 @@ async function callOpenRouter(
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://smartpdf-convert.com',
-        'X-Title': 'SmartPDF Convert',
+        'HTTP-Referer': 'https://xlify.app',
+        'X-Title': 'Xlify',
       },
       signal: controller.signal,
       body: JSON.stringify({
