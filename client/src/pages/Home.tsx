@@ -185,7 +185,7 @@ export default function Home() {
   const isPro = templatesData?.userIsPro ?? false;
 
   useEffect(() => {
-    document.title = 'Xlify - Stop Re-Keying Financial Documents';
+    document.title = 'PDF to Excel Converter - Extract Tables from PDF Free | Xlify';
   }, []);
 
   const handleFileSelect = (file: File, base64: string) => {

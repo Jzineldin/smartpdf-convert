@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import { trpc } from '@/lib/trpc';
 import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
@@ -76,6 +76,10 @@ export default function Pricing() {
   const [, setLocation] = useLocation();
   const { user, isAuthenticated } = useSupabaseAuth();
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    document.title = 'Pricing - PDF to Excel Converter Plans | Xlify';
+  }, []);
 
   const { data: profile } = trpc.user.getProfile.useQuery(undefined, {
     enabled: isAuthenticated,

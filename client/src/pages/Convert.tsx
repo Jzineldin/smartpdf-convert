@@ -176,6 +176,8 @@ export default function Convert() {
   // Each visit to /convert starts fresh - no localStorage caching
   // History is available in the Dashboard for logged-in users
   useEffect(() => {
+    // Set SEO-friendly page title
+    document.title = 'Convert PDF to Excel - Free Online Tool | Xlify';
     // Clean up any old localStorage cache from previous versions
     localStorage.removeItem('xlify_last_conversion');
   }, []);

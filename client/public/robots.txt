@@ -1,0 +1,15 @@
+# Xlify - AI-Powered PDF to Excel Converter
+# https://xlify.app
+
+User-agent: *
+Allow: /
+
+# Sitemap location
+Sitemap: https://xlify.app/sitemap.xml
+
+# Crawl-delay for politeness
+Crawl-delay: 1
+
+# Block internal/API routes from indexing
+Disallow: /api/
+Disallow: /trpc/
