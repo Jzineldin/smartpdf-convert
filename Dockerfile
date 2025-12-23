@@ -1,11 +1,18 @@
 FROM node:20-slim
 
-# Install GraphicsMagick, Ghostscript, and other dependencies for pdf2pic
+# Install all dependencies for pdf2pic (GraphicsMagick + Ghostscript) and sharp
 RUN apt-get update && apt-get install -y \
     graphicsmagick \
     ghostscript \
     libgs-dev \
-    && rm -rf /var/lib/apt/lists/*
+    fonts-liberation \
+    fonts-dejavu-core \
+    fontconfig \
+    libvips-dev \
+    build-essential \
+    python3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f -v
 
 # Install pnpm
 RUN npm install -g pnpm
