@@ -348,9 +348,9 @@ export const appRouter = router({
 
         // Create conversion record
         const conversion = await createConversion({
-          userId: ctx.user?.id || null,
-          anonymousId: input.anonymousId || null,
-          ipAddress: ip,
+          userId: ctx.user?.id ?? null,
+          anonymousId: input.anonymousId ?? null,
+          ipAddress: ip ?? null,
           originalFilename: input.fileName,
           fileSizeBytes: input.fileSize,
           status: 'processing',
@@ -575,13 +575,13 @@ export const appRouter = router({
 
         // Create conversion record
         const conversion = await createConversion({
-          userId: ctx.user?.id || null,
-          anonymousId: input.anonymousId || null,
-          ipAddress: ip,
+          userId: ctx.user?.id ?? null,
+          anonymousId: input.anonymousId ?? null,
+          ipAddress: ip ?? null,
           originalFilename: input.fileName,
           fileSizeBytes: input.fileSize,
           status: 'processing',
-          batchId: input.batchId || null,
+          batchId: input.batchId ?? null,
         });
 
         if (!conversion) {
