@@ -40,7 +40,7 @@ const PLANS = [
       { text: 'Confidence scoring', included: true },
       { text: 'Conversion history & exports', included: true },
     ],
-    cta: 'Start Free Trial',
+    cta: 'Upgrade to Pro',
     popular: true,
   },
 ];
