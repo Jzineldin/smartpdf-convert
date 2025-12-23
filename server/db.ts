@@ -6,17 +6,35 @@ import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 let _client: ReturnType<typeof postgres> | null = null;
+let _connectionError: Error | null = null;
 
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      _client = postgres(process.env.DATABASE_URL);
+      console.log("[Database] Initializing connection...");
+      _client = postgres(process.env.DATABASE_URL, {
+        max: 10,
+        idle_timeout: 20,
+        connect_timeout: 10,
+      });
       _db = drizzle(_client);
+      console.log("[Database] Connection initialized successfully");
+      _connectionError = null;
     } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+      console.error("[Database] Failed to connect:", error);
+      _connectionError = error instanceof Error ? error : new Error(String(error));
       _db = null;
     }
   }
+
+  if (!_db && !process.env.DATABASE_URL) {
+    console.warn("[Database] DATABASE_URL not set");
+  }
+
+  if (_connectionError) {
+    console.warn("[Database] Previous connection error:", _connectionError.message);
+  }
+
   return _db;
 }
 
@@ -241,14 +259,34 @@ export async function incrementAnonymousUsage(ipAddress: string) {
 
 export async function createConversion(data: InsertConversion): Promise<Conversion | null> {
   const db = await getDb();
-  if (!db) return null;
+  if (!db) {
+    console.error("[Database] createConversion failed: database not connected");
+    return null;
+  }
 
-  const result = await db.insert(conversions).values({
-    ...data,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-  }).returning();
+  try {
+    // Explicitly set null for optional fields to avoid empty string issues
+    const insertData = {
+      userId: data.userId ?? null,
+      anonymousId: data.anonymousId ?? null,
+      ipAddress: data.ipAddress ?? null,
+      originalFilename: data.originalFilename,
+      fileSizeBytes: data.fileSizeBytes,
+      status: data.status ?? 'pending',
+      batchId: data.batchId ?? null,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+    };
 
-  return result[0] || null;
+    console.log("[Database] Creating conversion with data:", JSON.stringify(insertData));
+
+    const result = await db.insert(conversions).values(insertData).returning();
+
+    console.log("[Database] Conversion created successfully, id:", result[0]?.id);
+    return result[0] || null;
+  } catch (error) {
+    console.error("[Database] createConversion error:", error);
+    throw error;
+  }
 }
 
 export async function updateConversion(id: number, data: Partial<InsertConversion>) {
