@@ -16,6 +16,7 @@ export async function getDb() {
         max: 10,
         idle_timeout: 20,
         connect_timeout: 10,
+        prepare: false, // Required for Supabase connection pooler (pgbouncer doesn't support prepared statements)
       });
       _db = drizzle(_client);
       console.log("[Database] Connection initialized successfully");
