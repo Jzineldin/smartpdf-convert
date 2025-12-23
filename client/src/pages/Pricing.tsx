@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { FileSpreadsheet, Check, X, Zap, Shield, CreditCard, Loader2 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { toast } from 'sonner';
 
 const PLANS = [
@@ -119,6 +120,7 @@ export default function Pricing() {
           </Link>
           
           <div className="flex items-center gap-4">
+            <ThemeToggle />
             {isAuthenticated ? (
               <Button variant="outline" size="sm" onClick={() => setLocation('/dashboard')}>
                 Dashboard

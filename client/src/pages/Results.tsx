@@ -23,6 +23,7 @@ import {
   Clock,
   Files,
 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import SmartSuggestions from '@/components/results/SmartSuggestions';
 import { toast } from 'sonner';
@@ -554,7 +555,7 @@ export default function Results() {
                           </thead>
                           <tbody>
                             {table.rows.slice(0, 10).map((row, rowIndex) => (
-                              <tr key={rowIndex} className="hover:bg-muted/50">
+                              <tr key={rowIndex} className="hover:bg-muted/50 transition-colors">
                                 {row.map((cell, cellIndex) => (
                                   <td key={cellIndex} className="border px-3 py-2">
                                     {cell ?? ''}
@@ -621,6 +622,7 @@ function Header() {
         </Link>
 
         <div className="flex items-center gap-4">
+          <ThemeToggle />
           {isAuthenticated ? (
             <Button variant="outline" onClick={() => setLocation('/dashboard')}>
               Dashboard

@@ -39,8 +39,14 @@ export default function ConfidenceScore({
     return 'Low confidence. Manual verification strongly recommended.';
   };
 
+  const getBorderColor = () => {
+    if (percentage >= 75) return 'border-l-green-500';
+    if (percentage >= 60) return 'border-l-yellow-500';
+    return 'border-l-red-500';
+  };
+
   return (
-    <Card className={`border-2 ${percentage >= 75 ? 'border-green-200 bg-green-50/50' : percentage >= 60 ? 'border-yellow-200 bg-yellow-50/50' : 'border-red-200 bg-red-50/50'} dark:bg-opacity-10 ${className}`}>
+    <Card className={`border-l-4 ${getBorderColor()} ${className}`}>
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -62,9 +68,9 @@ export default function ConfidenceScore({
             </Badge>
           </div>
         </div>
-        
+
         <Progress value={percentage} className="h-3 mb-3" />
-        
+
         <div className="flex items-center justify-between text-sm">
           <p className="text-muted-foreground">{getConfidenceDescription()}</p>
           <div className="flex gap-3 text-muted-foreground">

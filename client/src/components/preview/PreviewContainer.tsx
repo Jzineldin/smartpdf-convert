@@ -34,8 +34,14 @@ interface ExtractedTable {
   confidence: number | ConfidenceBreakdown;
 }
 
+interface PdfFileInfo {
+  base64: string;
+  fileName: string;
+}
+
 interface PreviewContainerProps {
-  pdfFile: string | null; // Base64 string
+  pdfFile: string | null; // Base64 string (for single file)
+  pdfFiles?: PdfFileInfo[]; // Multiple PDF files for batch uploads
   extractedSheets: ExtractedTable[];
   className?: string;
   defaultViewMode?: ViewMode;
@@ -47,6 +53,7 @@ interface PreviewContainerProps {
 
 export default function PreviewContainer({
   pdfFile,
+  pdfFiles,
   extractedSheets,
   className,
   defaultViewMode = 'split',
@@ -67,6 +74,25 @@ export default function PreviewContainer({
     return sources;
   }, [extractedSheets]);
   const isFromMultipleSources = sourceFiles.size > 1;
+
+  // Track current PDF file index for batch uploads
+  const [currentPdfIndex, setCurrentPdfIndex] = useState(0);
+
+  // Get the currently displayed PDF
+  const currentPdf = useMemo(() => {
+    if (pdfFiles && pdfFiles.length > 0) {
+      return pdfFiles[currentPdfIndex]?.base64 || null;
+    }
+    return pdfFile;
+  }, [pdfFile, pdfFiles, currentPdfIndex]);
+
+  // Get current PDF filename
+  const currentPdfFileName = useMemo(() => {
+    if (pdfFiles && pdfFiles.length > 0) {
+      return pdfFiles[currentPdfIndex]?.fileName || `File ${currentPdfIndex + 1}`;
+    }
+    return null;
+  }, [pdfFiles, currentPdfIndex]);
   const [viewMode, setViewMode] = useState<ViewMode>(defaultViewMode);
   const [currentPage, setCurrentPage] = useState(initialPage);
   const [currentSheet, setCurrentSheet] = useState<string | null>(
@@ -109,7 +135,7 @@ export default function PreviewContainer({
     return map;
   }, [extractedSheets]);
 
-  // When user selects a sheet, sync PDF to that page
+  // When user selects a sheet, sync PDF to that page and switch PDF file if needed
   const handleSheetChange = useCallback((sheetName: string) => {
     setCurrentSheet(sheetName);
     onSheetChange?.(sheetName);
@@ -118,8 +144,17 @@ export default function PreviewContainer({
     if (sheet) {
       setCurrentPage(sheet.pageNumber);
       onPageChange?.(sheet.pageNumber);
+
+      // If we have multiple PDF files, switch to the correct one based on sourceFile
+      if (pdfFiles && pdfFiles.length > 0 && 'sourceFile' in sheet) {
+        const sourceFileName = (sheet as any).sourceFile;
+        const pdfIndex = pdfFiles.findIndex(pdf => pdf.fileName === sourceFileName);
+        if (pdfIndex !== -1 && pdfIndex !== currentPdfIndex) {
+          setCurrentPdfIndex(pdfIndex);
+        }
+      }
     }
-  }, [extractedSheets, onSheetChange, onPageChange]);
+  }, [extractedSheets, onSheetChange, onPageChange, pdfFiles, currentPdfIndex]);
 
   // When user changes PDF page, update current sheet
   const handlePageChange = useCallback((page: number) => {
@@ -157,15 +192,16 @@ export default function PreviewContainer({
   // Available modes based on what's loaded
   const availableModes = useMemo(() => {
     const modes: ViewMode[] = [];
-    if (pdfFile) modes.push('pdf');
+    const hasPdf = currentPdf || (pdfFiles && pdfFiles.length > 0);
+    if (hasPdf) modes.push('pdf');
     if (extractedSheets.length > 0) modes.push('table');
-    if (pdfFile && extractedSheets.length > 0 && !isMobile) {
+    if (hasPdf && extractedSheets.length > 0 && !isMobile) {
       modes.push('split');
       // Overlay mode is advanced - uncomment to enable
       // modes.push('overlay');
     }
     return modes;
-  }, [pdfFile, extractedSheets, isMobile]);
+  }, [currentPdf, pdfFiles, extractedSheets, isMobile]);
 
   // Ensure view mode is valid
   useEffect(() => {
@@ -199,13 +235,23 @@ export default function PreviewContainer({
         )}
       </div>
 
-      {/* Batch upload notice */}
-      {isFromMultipleSources && viewMode === 'split' && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800 text-sm">
-          <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-          <span className="text-amber-700 dark:text-amber-300">
-            Viewing first PDF from batch. Tables are from {sourceFiles.size} different files.
+      {/* Batch upload file selector */}
+      {pdfFiles && pdfFiles.length > 1 && (viewMode === 'split' || viewMode === 'pdf') && (
+        <div className="flex items-center gap-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800 text-sm">
+          <span className="text-blue-700 dark:text-blue-300 whitespace-nowrap">
+            Viewing file {currentPdfIndex + 1} of {pdfFiles.length}:
           </span>
+          <select
+            value={currentPdfIndex}
+            onChange={(e) => setCurrentPdfIndex(Number(e.target.value))}
+            className="flex-1 min-w-0 bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-700 rounded px-2 py-1 text-sm truncate"
+          >
+            {pdfFiles.map((pdf, index) => (
+              <option key={index} value={index}>
+                {pdf.fileName}
+              </option>
+            ))}
+          </select>
         </div>
       )}
 
@@ -215,7 +261,7 @@ export default function PreviewContainer({
           mode={viewMode}
           leftPanel={
             <PDFPreview
-              file={pdfFile}
+              file={currentPdf}
               currentPage={currentPage}
               onPageChange={handlePageChange}
               onLoadSuccess={handlePdfLoadSuccess}

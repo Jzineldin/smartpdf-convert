@@ -2,17 +2,22 @@ import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { 
-  Table, 
-  Receipt, 
-  Landmark, 
-  CreditCard, 
-  Package, 
+import {
+  Table,
+  Receipt,
+  Landmark,
+  CreditCard,
+  Package,
   TrendingUp,
   Lock,
   Check,
   Crown,
-  Play
+  Play,
+  FileText,
+  Building2,
+  Wallet,
+  ClipboardList,
+  BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -49,6 +54,12 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
   CreditCard,
   Package,
   TrendingUp,
+  // More descriptive alternatives
+  FileText,      // Generic documents
+  Building2,     // Bank statements
+  Wallet,        // Expense reports
+  ClipboardList, // Inventory
+  BarChart3,     // Sales reports
 };
 
 // TEMPORARY: Set to true for testing, false for production

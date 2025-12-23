@@ -23,6 +23,7 @@ import {
   Loader2,
   Files,
 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { useMemo } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
@@ -137,6 +138,7 @@ export default function Dashboard() {
           </Link>
           
           <div className="flex items-center gap-4">
+            <ThemeToggle />
             <Button variant="default" size="sm" onClick={() => setLocation('/convert')}>
               <Plus className="h-4 w-4 mr-2" />
               New Conversion

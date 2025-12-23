@@ -12,15 +12,26 @@ const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrout
 // ============================================
 
 // Analysis phase types
+export interface DetectedTablePreview {
+  name: string;
+  pageNumber: number;
+  rowCount: number;
+  columnCount: number;
+  headers: string[];
+  previewRows: (string | null)[][];
+}
+
 export interface DocumentAnalysis {
   analysis: {
     documentType: string;
     pageCount: number;
     tablesDetected: number;
+    tablesPerPage?: { page: number; tables: number; description?: string }[];
     languages: string[];
     complexity: 'low' | 'medium' | 'high';
     estimatedExtractionTime: string;
   };
+  detectedTables?: DetectedTablePreview[];
   questions: AnalysisQuestion[];
   suggestions: Suggestion[];
   warnings: string[];
@@ -42,12 +53,23 @@ export interface Suggestion {
   accepted?: boolean;
 }
 
+// Extraction mode types - determines how AI extracts data
+export type ExtractionMode =
+  | 'invoice_extract'
+  | 'bank_extract'
+  | 'expense_extract'
+  | 'inventory_extract'
+  | 'sales_extract'
+  | 'table_extract'
+  | 'clean_summarize';
+
 // User guidance types
 export interface UserGuidance {
   answers: Record<string, string>;
   acceptedSuggestions: string[];
   freeformInstructions?: string;
   outputPreferences?: OutputPreferences;
+  extractionMode?: ExtractionMode;
 }
 
 export interface OutputPreferences {
@@ -176,8 +198,27 @@ When counting "tablesDetected", follow these rules STRICTLY:
 4. A table about "Product A" and another about "Product B" = 2 SEPARATE tables
 5. Do NOT pre-group or combine tables in your count - count them individually
 6. If a page has 5 separate bordered/structured data sections, report 5 tables
+7. COUNT TABLES ACROSS ALL PAGES SHOWN - add up tables from each page
+8. For multi-page documents: Page 1 has 3 tables + Page 2 has 2 tables = 5 total tables
+
+COLUMN COUNTING:
+- Count the ACTUAL number of columns in each table
+- Include ALL columns, even narrow ones (checkboxes, numbers, dates)
+- A table header with "Feature | Product A | Product B | Product C | Notes" = 5 columns
+- Don't skip columns just because they contain short values or symbols
 
 Example: A competitive analysis with sections for 6 different competitors = 6+ tables, NOT 1
+
+DETECTED TABLES PREVIEW:
+For EACH table you detect, provide:
+- name: A descriptive name for the table (e.g., "Invoice Items", "Transaction History")
+- pageNumber: Which page the table is on
+- rowCount: Estimated number of data rows (excluding header)
+- columnCount: EXACT number of columns (count ALL columns!)
+- headers: The ACTUAL column headers from the document (extract the real text)
+- previewRows: First 2-3 rows of ACTUAL data from the table (extract the real values)
+
+CRITICAL: Extract REAL data from the document for headers and previewRows, not placeholders!
 === END TABLE COUNTING RULES ===
 
 === PROACTIVE QUESTIONS - ALWAYS ASK IF PATTERNS DETECTED ===
@@ -233,12 +274,40 @@ OUTPUT FORMAT (JSON only, no markdown):
 {
   "analysis": {
     "documentType": "Competitive Analysis Report",
-    "pageCount": 1,
-    "tablesDetected": 3,
+    "pageCount": 2,
+    "tablesDetected": 5,
+    "tablesPerPage": [
+      { "page": 1, "tables": 3, "description": "Header info and 2 data tables" },
+      { "page": 2, "tables": 2, "description": "Continuation tables" }
+    ],
     "languages": ["English"],
     "complexity": "medium",
     "estimatedExtractionTime": "10-15 seconds"
   },
+  "detectedTables": [
+    {
+      "name": "Invoice Header",
+      "pageNumber": 1,
+      "rowCount": 5,
+      "columnCount": 4,
+      "headers": ["Description", "Quantity", "Unit Price", "Amount"],
+      "previewRows": [
+        ["Website Design", "1", "$2,500", "$2,500"],
+        ["Development", "40 hrs", "$100", "$4,000"]
+      ]
+    },
+    {
+      "name": "Payment Summary",
+      "pageNumber": 1,
+      "rowCount": 3,
+      "columnCount": 2,
+      "headers": ["Item", "Value"],
+      "previewRows": [
+        ["Subtotal", "$6,500"],
+        ["Tax (8%)", "$520"]
+      ]
+    }
+  ],
   "questions": [
     {
       "id": "symbols_checkbox",
@@ -509,11 +578,190 @@ OUTPUT FORMAT:
 First row should ALWAYS be Document Type.`;
 
 // ============================================
+// EXTRACTION MODE PROMPTS
+// ============================================
+
+const EXTRACTION_MODE_PROMPTS: Record<ExtractionMode, string> = {
+  invoice_extract: `INVOICE EXTRACTION MODE - Specialized extraction for invoices.
+
+EXTRACT THE FOLLOWING:
+1. **Header Information:**
+   - Vendor/Company name and address
+   - Invoice number, date, due date
+   - PO number (if present)
+
+2. **Customer Information:**
+   - Bill to name/company and address
+   - Ship to address (if different)
+
+3. **Line Items Table:**
+   - Item description, quantity, unit price, amount
+   - Any item codes or SKUs
+
+4. **Totals (SEPARATE TABLE):**
+   - Subtotal, tax (amount and rate), shipping/handling
+   - Discounts, grand total
+
+5. **Payment Information:**
+   - Payment terms, bank details, instructions
+
+CRITICAL: Create separate tables for "Invoice Details", "Line Items", and "Totals".`,
+
+  bank_extract: `BANK STATEMENT EXTRACTION MODE - Specialized extraction for bank statements.
+
+EXTRACT THE FOLLOWING:
+1. **Account Information:**
+   - Bank name, account holder name
+   - Account number (even if partially masked)
+   - Statement period, account type
+
+2. **Balance Summary:**
+   - Opening/beginning balance
+   - Total deposits/credits
+   - Total withdrawals/debits
+   - Closing/ending balance
+
+3. **Transaction Table:**
+   - Date, description/memo
+   - Reference number (if present)
+   - Debit/credit amount
+   - Running balance (if shown)
+
+VALIDATION: Opening + deposits - withdrawals should equal closing balance.
+CRITICAL: Create separate tables for "Account Summary" and "Transactions".`,
+
+  expense_extract: `EXPENSE REPORT EXTRACTION MODE - Specialized extraction for expense reports.
+
+EXTRACT THE FOLLOWING:
+1. **Report Information:**
+   - Employee name, department
+   - Report date/period, report number
+
+2. **Expense Items Table:**
+   - Date of expense, category
+   - Description/purpose, vendor/merchant
+   - Amount, currency
+   - Receipt attached (Y/N)
+
+3. **Totals (SEPARATE TABLE):**
+   - Total by category
+   - Grand total, amount approved
+   - Advance received, net reimbursement
+
+CRITICAL: Create separate tables for "Report Summary", "Expenses", and "Totals".`,
+
+  inventory_extract: `INVENTORY LIST EXTRACTION MODE - Specialized extraction for inventory.
+
+EXTRACT THE FOLLOWING:
+1. **Inventory Items Table:**
+   - SKU/product code
+   - Product name/description
+   - Category, location/warehouse/bin
+   - Quantity on hand, unit of measure
+   - Unit cost, extended value
+
+2. **Summary (if present):**
+   - Total items/SKUs
+   - Total quantity
+   - Total inventory value
+
+CRITICAL: Preserve exact product codes and keep original number formats.`,
+
+  sales_extract: `SALES REPORT EXTRACTION MODE - Specialized extraction for sales reports.
+
+EXTRACT THE FOLLOWING:
+1. **Report Period & Summary:**
+   - Report period, total revenue/sales
+   - Number of transactions
+   - Average transaction value
+   - Comparison to previous period
+
+2. **Sales by Category/Product:**
+   - Product/category name
+   - Units sold, revenue
+   - Percentage of total
+
+3. **Top Performers (if shown):**
+   - Top products, customers, sales reps
+
+CRITICAL: Keep original currency and percentage formats.`,
+
+  table_extract: `GENERIC TABLE EXTRACTION MODE - Extract all tables as-is.
+
+CRITICAL RULES:
+1. Preserve EXACT original values - do not normalize, convert, or modify any data
+2. Keep original date formats exactly as shown
+3. Keep original number formats exactly as shown
+4. Keep currency symbols and special characters exactly as displayed
+5. Extract ALL rows and columns - do not skip any data
+6. Each visually distinct table = separate entry in tables array`,
+
+  clean_summarize: `CLEAN & SUMMARIZE MODE - Organize messy content into readable format.
+
+This document may not have clean table structures. Your job is to:
+1. Identify the main topics and sections
+2. Extract key information in a structured way
+3. Create a clean, organized summary
+
+OUTPUT FORMAT:
+{
+  "tables": [
+    {
+      "sheetName": "Document Summary",
+      "pageNumber": 1,
+      "headers": ["Section", "Content"],
+      "rows": [
+        ["Document Type", "..."],
+        ["Key Information", "..."],
+        ["Main Points", "..."]
+      ],
+      "confidence": 90
+    },
+    {
+      "sheetName": "Extracted Data",
+      "pageNumber": 1,
+      "headers": ["Field", "Value"],
+      "rows": [
+        ["...", "..."]
+      ],
+      "confidence": 90
+    }
+  ],
+  "summary": "A brief 2-3 sentence summary of the document content",
+  "warnings": [],
+  "overallConfidence": 90
+}
+
+Focus on CLARITY and USEFULNESS rather than preserving exact table structure.
+If the document has any tables, also extract them normally.`,
+};
+
+/**
+ * Get the extraction mode prompt based on the guidance
+ */
+function getExtractionModePrompt(extractionMode?: ExtractionMode): string {
+  if (!extractionMode) {
+    return '';
+  }
+  return EXTRACTION_MODE_PROMPTS[extractionMode] || '';
+}
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 
 function buildGuidanceString(guidance: UserGuidance): string {
   const parts: string[] = [];
+
+  // Add extraction mode-specific instructions first (highest priority)
+  if (guidance.extractionMode) {
+    const modePrompt = getExtractionModePrompt(guidance.extractionMode);
+    if (modePrompt) {
+      parts.push('=== EXTRACTION MODE INSTRUCTIONS ===');
+      parts.push(modePrompt);
+      parts.push('=== END EXTRACTION MODE ===\n');
+    }
+  }
 
   if (Object.keys(guidance.answers).length > 0) {
     parts.push('USER ANSWERS TO QUESTIONS:');
@@ -544,7 +792,14 @@ function buildGuidanceString(guidance: UserGuidance): string {
     if (prefs.skipDiagrams) parts.push('- Skip ASCII diagrams and charts');
     if (prefs.skipImages) parts.push('- Skip decorative images');
     if (prefs.outputLanguage && prefs.outputLanguage !== 'auto') {
-      parts.push(`- Use ${prefs.outputLanguage} for column headers and field names`);
+      parts.push(`\n=== LANGUAGE INSTRUCTIONS ===`);
+      parts.push(`OUTPUT LANGUAGE: ${prefs.outputLanguage.toUpperCase()}`);
+      parts.push(`- Translate ALL extracted content (headers, data values, text) to ${prefs.outputLanguage}`);
+      parts.push(`- Keep numbers, dates, and currency values in their original format but translate any text labels`);
+      parts.push(`- Translate column headers and field names to ${prefs.outputLanguage}`);
+      parts.push(`- For proper nouns (company names, product names, person names), keep the original`);
+      parts.push(`- For technical terms without a good translation, keep the original with optional translation in parentheses`);
+      parts.push(`=== END LANGUAGE INSTRUCTIONS ===`);
     }
     if (prefs.symbolMapping) {
       parts.push('- CRITICAL SYMBOL CONVERSIONS (apply to ALL matching symbols):');
@@ -622,6 +877,43 @@ function applySymbolConversions(tables: ExtractedTable[], guidance: UserGuidance
       rows: table.rows.map(row => row.map(cell => convertCell(cell))),
     };
   });
+}
+
+/**
+ * Detect if a row is a summary/total row that should NOT receive merged cell values
+ * Summary rows typically contain keywords like TOTAL, SUM, SUBTOTAL, etc.
+ */
+function isSummaryRow(row: (string | null)[]): boolean {
+  const summaryKeywords = [
+    'total', 'totalt', 'summa', 'sum', 'subtotal', 'grand total',
+    'amount due', 'balance', 'net', 'gross', 'average', 'avg',
+    'count', 'min', 'max', 'mean', 'median',
+    // Swedish/Nordic
+    'totalt', 'summa', 'delsumma', 'slutsumma', 'moms', 'att betala',
+    // German
+    'gesamt', 'summe', 'zwischensumme', 'mwst', 'netto', 'brutto',
+    // Common abbreviations
+    'tot', 'sub', 'ttl'
+  ];
+
+  // Check first few cells for summary keywords
+  for (let i = 0; i < Math.min(3, row.length); i++) {
+    const cellValue = row[i];
+    if (cellValue && typeof cellValue === 'string') {
+      const lowerValue = cellValue.toLowerCase().trim();
+      // Check if the cell contains any summary keyword
+      for (const keyword of summaryKeywords) {
+        if (lowerValue === keyword ||
+            lowerValue.startsWith(keyword + ' ') ||
+            lowerValue.startsWith(keyword + ':') ||
+            lowerValue.endsWith(' ' + keyword) ||
+            lowerValue.includes(' ' + keyword + ' ')) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -705,9 +997,12 @@ function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
         row = row.slice(0, headerCount);
       }
 
-      // Only fill from previous row if we detected a merged cell pattern
-      // This prevents incorrect filling when tables just have empty cells
-      if (hasMergedCellPattern) {
+      // CRITICAL: Check if this is a summary/total row - do NOT fill from previous rows
+      const isThisSummaryRow = isSummaryRow(row);
+
+      // Only fill from previous row if we detected a merged cell pattern AND this is not a summary row
+      // This prevents incorrect filling when tables just have empty cells or summary rows
+      if (hasMergedCellPattern && !isThisSummaryRow) {
         for (let colIndex = 0; colIndex < Math.min(2, row.length); colIndex++) {
           const value = row[colIndex];
           if ((value === '' || value === null) && lastValues[colIndex] !== null) {
@@ -721,9 +1016,14 @@ function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
       }
 
       // Track non-empty values for potential merged cell filling
-      for (let colIndex = 0; colIndex < row.length; colIndex++) {
-        if (row[colIndex] !== '' && row[colIndex] !== null) {
-          lastValues[colIndex] = row[colIndex];
+      // For summary rows: Reset lastValues to prevent leaking into rows AFTER the summary
+      if (isThisSummaryRow) {
+        lastValues.fill(null);
+      } else {
+        for (let colIndex = 0; colIndex < row.length; colIndex++) {
+          if (row[colIndex] !== '' && row[colIndex] !== null) {
+            lastValues[colIndex] = row[colIndex];
+          }
         }
       }
 
@@ -1073,7 +1373,15 @@ export async function analyzeDocument(
     }
     try {
       const cleanContent = result.content!.replace(/```json\n?|\n?```/g, '').trim();
-      return JSON.parse(cleanContent);
+      const parsed = JSON.parse(cleanContent);
+
+      // Debug: Log if detectedTables was returned
+      console.log(`[Analysis] Multi-image analysis returned: tablesDetected=${parsed.analysis?.tablesDetected}, detectedTables count=${parsed.detectedTables?.length || 0}`);
+      if (parsed.detectedTables && parsed.detectedTables.length > 0) {
+        console.log(`[Analysis] First detected table: ${parsed.detectedTables[0].name}, ${parsed.detectedTables[0].columnCount} columns, headers: ${parsed.detectedTables[0].headers?.join(', ')}`);
+      }
+
+      return parsed;
     } catch (e) {
       console.error('Failed to parse analysis response:', result.content);
       throw new Error('Failed to parse analysis response');
@@ -1086,7 +1394,7 @@ export async function analyzeDocument(
   const imageMimeType = mimeType === 'application/pdf' ? 'image/png' : mimeType;
   const dataUrl = `data:${imageMimeType};base64,${cleanBase64}`;
 
-  const userPrompt = `Analyze this document and generate clarifying questions: "${fileName}". Return valid JSON only, no markdown.`;
+  const userPrompt = `Analyze this document and generate clarifying questions: "${fileName}". IMPORTANT: You MUST include the "detectedTables" array with actual table data from the document. Return valid JSON only, no markdown.`;
   const result = await callAI(cleanBase64, imageMimeType, dataUrl, ANALYSIS_PROMPT, userPrompt, 30000);
 
   if (!result.success) {
@@ -1095,7 +1403,15 @@ export async function analyzeDocument(
 
   try {
     const cleanContent = result.content!.replace(/```json\n?|\n?```/g, '').trim();
-    return JSON.parse(cleanContent);
+    const parsed = JSON.parse(cleanContent);
+
+    // Debug: Log if detectedTables was returned
+    console.log(`[Analysis] Single-image analysis returned: tablesDetected=${parsed.analysis?.tablesDetected}, detectedTables count=${parsed.detectedTables?.length || 0}`);
+    if (parsed.detectedTables && parsed.detectedTables.length > 0) {
+      console.log(`[Analysis] First detected table: ${parsed.detectedTables[0].name}, ${parsed.detectedTables[0].columnCount} columns, headers: ${parsed.detectedTables[0].headers?.join(', ')}`);
+    }
+
+    return parsed;
   } catch (e) {
     console.error('Failed to parse analysis response:', result.content);
     throw new Error('Failed to parse analysis response');
@@ -1122,8 +1438,15 @@ async function callGoogleAIMultiImage(
 
     // Add text prompt first
     const pageInfo = pageNumbers.map((p, i) => `Image ${i + 1} = Page ${p}`).join(', ');
+    const totalPagesShown = images.length;
     parts.push({
-      text: `${ANALYSIS_PROMPT}\n\nAnalyze these sample pages from document "${fileName}" and generate clarifying questions.\n${pageInfo}\nLook for patterns across ALL pages shown. Return valid JSON only, no markdown.`
+      text: `${ANALYSIS_PROMPT}\n\nAnalyze these ${totalPagesShown} pages from document "${fileName}" and generate clarifying questions.\n${pageInfo}\n\nCRITICAL REQUIREMENTS:
+1. Count tables on EACH page and SUM them for "tablesDetected". If Page 1 has 3 tables and Page 2 has 2 tables, report tablesDetected: 5.
+2. You MUST include the "detectedTables" array with ACTUAL table data extracted from the document.
+3. For each table, provide the REAL column headers and 2-3 REAL preview rows of data.
+4. Count ALL columns accurately - if a table has 8 columns, report columnCount: 8.
+
+Return valid JSON only, no markdown.`
     });
 
     // Add each image

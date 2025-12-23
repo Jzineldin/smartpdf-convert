@@ -205,19 +205,21 @@ export const appRouter = router({
             const totalPages = pdfConversion.totalPages;
 
             // Calculate sample pages to analyze
+            // For 2-page document: pages 1, 2 (ALL pages)
+            // For 3-5 page document: pages 1, middle, last
             // For 11-page document: pages 1, 3, 6, 9, 11
             const samplePageNumbers: number[] = [1]; // Always include page 1
 
-            if (totalPages >= 3) {
+            if (totalPages === 2) {
+              // For 2-page documents, ALWAYS analyze both pages
+              samplePageNumbers.push(2);
+            } else if (totalPages >= 3) {
               // Add middle page
               const middlePage = Math.ceil(totalPages / 2);
               if (!samplePageNumbers.includes(middlePage)) {
                 samplePageNumbers.push(middlePage);
               }
-            }
-
-            if (totalPages >= 5) {
-              // Add last page
+              // Always add last page for 3+ page documents
               if (!samplePageNumbers.includes(totalPages)) {
                 samplePageNumbers.push(totalPages);
               }
@@ -303,6 +305,15 @@ export const appRouter = router({
           answers: z.record(z.string(), z.unknown()),
           acceptedSuggestions: z.array(z.string()),
           freeformInstructions: z.string().optional(),
+          extractionMode: z.enum([
+            'invoice_extract',
+            'bank_extract',
+            'expense_extract',
+            'inventory_extract',
+            'sales_extract',
+            'table_extract',
+            'clean_summarize',
+          ]).optional(),
           outputPreferences: z.object({
             combineRelatedTables: z.boolean(),
             outputLanguage: z.enum(['auto', 'english', 'swedish', 'german', 'spanish', 'french']),

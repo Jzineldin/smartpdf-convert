@@ -7,7 +7,7 @@ import "@fortune-sheet/react/dist/index.css";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { Button } from '@/components/ui/button';
-import { Download, Copy, Check, FileDown } from 'lucide-react';
+import { Download, Copy, Check, FileDown, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { exportToPdf } from '@/lib/exportPdf';
 
@@ -45,12 +45,42 @@ interface SpreadsheetEditorProps {
 }
 
 /**
+ * Truncate sheet name to Excel's 31-character limit
+ * Also removes invalid characters: \ / ? * [ ]
+ */
+function sanitizeSheetName(name: string, index: number): string {
+  const MAX_SHEET_NAME_LENGTH = 31;
+
+  // Remove invalid Excel sheet name characters
+  let sanitized = name.replace(/[\\/?*[\]]/g, '');
+
+  // Trim whitespace
+  sanitized = sanitized.trim();
+
+  // If empty after sanitization, use default
+  if (!sanitized) {
+    return `Sheet${index + 1}`;
+  }
+
+  // Truncate if too long, leaving room for potential suffix
+  if (sanitized.length > MAX_SHEET_NAME_LENGTH) {
+    // Truncate and add ellipsis indicator
+    sanitized = sanitized.substring(0, MAX_SHEET_NAME_LENGTH - 1) + '…';
+  }
+
+  return sanitized;
+}
+
+/**
  * Convert extracted AI tables to FortuneSheet format
  */
 function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
+  // Track used names to avoid duplicates
+  const usedNames = new Set<string>();
+
   return tables.map((table, index) => {
     const celldata: any[] = [];
-    
+
     // Headers (bold with background)
     table.headers.forEach((header, colIndex) => {
       celldata.push({
@@ -59,7 +89,7 @@ function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
         v: { v: header || '', bl: 1, bg: "#f3f4f6" }
       });
     });
-    
+
     // Data rows
     table.rows.forEach((row, rowIndex) => {
       row.forEach((cell, colIndex) => {
@@ -70,14 +100,45 @@ function convertToFortuneSheet(tables: ExtractedTable[]): SheetData[] {
         });
       });
     });
-    
+
+    // Calculate dimensions for proper FortuneSheet initialization
+    const rowCount = table.rows.length + 1; // +1 for header
+    const colCount = table.headers.length;
+
+    // Sanitize and deduplicate sheet name
+    let sheetName = sanitizeSheetName(table.sheetName || `Sheet${index + 1}`, index);
+
+    // Handle duplicate names by adding suffix
+    let baseName = sheetName;
+    let counter = 2;
+    while (usedNames.has(sheetName)) {
+      const suffix = ` (${counter})`;
+      const maxBaseLength = 31 - suffix.length;
+      baseName = sanitizeSheetName(table.sheetName || `Sheet${index + 1}`, index);
+      if (baseName.length > maxBaseLength) {
+        baseName = baseName.substring(0, maxBaseLength);
+      }
+      sheetName = baseName + suffix;
+      counter++;
+    }
+    usedNames.add(sheetName);
+
     return {
-      name: table.sheetName || `Sheet${index + 1}`,
+      name: sheetName,
       celldata,
+      row: Math.max(rowCount, 50), // Minimum 50 rows for scrolling
+      column: Math.max(colCount, 26), // Minimum 26 columns (A-Z)
       config: {
         rowlen: { 0: 30 },
         columnlen: {},
       },
+      // Set initial selection to avoid NaN issue
+      luckysheet_select_save: [{
+        row: [0, 0],
+        column: [0, 0],
+        row_focus: 0,
+        column_focus: 0,
+      }],
     } as SheetData;
   });
 }
@@ -250,6 +311,8 @@ function copyToClipboard(sheets: SheetData[]) {
 export default function SpreadsheetEditor({ tables, filename, onExport, showPdfExport = true }: SpreadsheetEditorProps) {
   const [data, setData] = useState<SheetData[]>([]);
   const [copied, setCopied] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   useEffect(() => {
     if (tables && tables.length > 0) {
@@ -259,6 +322,7 @@ export default function SpreadsheetEditor({ tables, filename, onExport, showPdfE
   }, [tables]);
 
   const handleExport = useCallback(async () => {
+    setIsExporting(true);
     try {
       // Ensure filename ends with .xlsx
       let exportFilename = filename.replace(/\.(pdf|png|jpg|jpeg|webp)$/i, '');
@@ -273,6 +337,8 @@ export default function SpreadsheetEditor({ tables, filename, onExport, showPdfE
     } catch (error) {
       console.error('Export error:', error);
       toast.error('Failed to export Excel file');
+    } finally {
+      setIsExporting(false);
     }
   }, [data, filename, onExport]);
 
@@ -289,13 +355,16 @@ export default function SpreadsheetEditor({ tables, filename, onExport, showPdfE
     }
   }, [data]);
 
-  const handlePdfExport = useCallback(() => {
+  const handlePdfExport = useCallback(async () => {
+    setIsExportingPdf(true);
     try {
-      exportToPdf(tables, filename);
+      await exportToPdf(tables, filename);
       toast.success('PDF file downloaded successfully!');
     } catch (error) {
       console.error('PDF export error:', error);
       toast.error('Failed to export PDF file');
+    } finally {
+      setIsExportingPdf(false);
     }
   }, [tables, filename]);
 
@@ -338,20 +407,30 @@ export default function SpreadsheetEditor({ tables, filename, onExport, showPdfE
               variant="outline"
               size="sm"
               onClick={handlePdfExport}
+              disabled={isExportingPdf}
               className="gap-2"
             >
-              <FileDown className="h-4 w-4" />
-              Download PDF
+              {isExportingPdf ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4" />
+              )}
+              {isExportingPdf ? 'Exporting...' : 'Download PDF'}
             </Button>
           )}
           <Button
             variant="default"
             size="sm"
             onClick={handleExport}
+            disabled={isExporting}
             className="gap-2"
           >
-            <Download className="h-4 w-4" />
-            Export XLSX
+            {isExporting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {isExporting ? 'Exporting...' : 'Export XLSX'}
           </Button>
         </div>
       </div>

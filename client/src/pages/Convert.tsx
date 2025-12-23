@@ -5,14 +5,15 @@ import { useSupabaseAuth } from '@/contexts/SupabaseAuthContext';
 import DropZone from '@/components/upload/DropZone';
 import ProcessingStatus, { ProcessingStep } from '@/components/upload/ProcessingStatus';
 import SpreadsheetEditor from '@/components/editor/SpreadsheetEditor';
-import AnalysisDialog from '@/components/analysis/AnalysisDialog';
+import ExtractionOptions from '@/components/analysis/ExtractionOptions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileSpreadsheet, ArrowLeft, Zap, AlertTriangle, CheckCircle, RotateCcw, Edit3, Eye, Crown, Plus, Files, Info, Loader2, Columns2, Maximize2, Minimize2 } from 'lucide-react';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 import { PreviewContainer } from '@/components/preview';
-import TemplateSelector from '@/components/templates/TemplateSelector';
+// TemplateSelector removed - now using AI auto-detection flow
 import { cn } from '@/lib/utils';
 import ConfidenceScore from '@/components/results/ConfidenceScore';
 import { toast } from 'sonner';
@@ -104,10 +105,20 @@ interface Suggestion {
   accepted?: boolean;
 }
 
+type ExtractionMode =
+  | 'invoice_extract'
+  | 'bank_extract'
+  | 'expense_extract'
+  | 'inventory_extract'
+  | 'sales_extract'
+  | 'table_extract'
+  | 'clean_summarize';
+
 interface UserGuidance {
   answers: Record<string, string>;
   acceptedSuggestions: string[];
   freeformInstructions?: string;
+  extractionMode?: ExtractionMode;
   outputPreferences?: {
     combineRelatedTables: boolean;
     outputLanguage: 'auto' | 'english' | 'swedish' | 'german' | 'spanish' | 'french';
@@ -129,12 +140,13 @@ export default function Convert() {
   const [viewMode, setViewMode] = useState<'preview' | 'split' | 'edit'>('preview');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Store the original PDF file for split view
+  // Store PDF file(s) for split view
   const [originalPdfBase64, setOriginalPdfBase64] = useState<string | null>(null);
+  const [pdfFiles, setPdfFiles] = useState<Array<{ base64: string; fileName: string }>>([]);
   const [pageCount, setPageCount] = useState<number | undefined>(undefined);
   const [fileName, setFileName] = useState<string>('converted-tables');
+  // selectedTemplate now auto-detected by AI, not user-selected pre-upload
   const [selectedTemplate, setSelectedTemplate] = useState<string>('generic');
-  const [isTryingSample, setIsTryingSample] = useState<boolean>(false);
 
   // Batch upload state (Pro feature)
   const [accumulatedTables, setAccumulatedTables] = useState<TableWithSource[]>([]);
@@ -150,6 +162,7 @@ export default function Convert() {
   const [currentFileData, setCurrentFileData] = useState<{ base64: string; mimeType: string; name: string; size: number } | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isTryingSample, setIsTryingSample] = useState(false);
 
   const { data: usageData } = trpc.conversion.checkUsage.useQuery();
   const { data: templatesData } = trpc.conversion.getTemplates.useQuery();
@@ -207,6 +220,7 @@ export default function Convert() {
     setExtractedTables(null);
     setWarnings([]);
     setViewMode('preview');
+    setFileName(pendingFile.name);
 
     // Check usage limit
     if (usageData && !usageData.allowed) {
@@ -214,8 +228,18 @@ export default function Convert() {
       return;
     }
 
-    // Store PDF for split view preview (pending files are usually PDFs)
+    const mimeType = 'application/pdf';
     const isPdf = pendingFile.name.toLowerCase().endsWith('.pdf');
+
+    // Store file data for later extraction
+    setCurrentFileData({
+      base64: pendingFile.base64,
+      mimeType,
+      name: pendingFile.name,
+      size: pendingFile.size,
+    });
+
+    // Store PDF for split view preview
     if (isPdf) {
       setOriginalPdfBase64(pendingFile.base64);
     } else {
@@ -223,46 +247,68 @@ export default function Convert() {
     }
 
     setProcessingStep('upload');
+    setIsAnalyzing(true);
 
     try {
+      // Analyze document first to show extraction options
       setProcessingStep('analyze');
+      toast.info('Analyzing your document...');
 
-      const result = await processMutation.mutateAsync({
+      const analysisRes = await analyzeMutation.mutateAsync({
         fileBase64: pendingFile.base64,
         fileName: pendingFile.name,
-        fileSize: pendingFile.size,
-        mimeType: 'application/pdf',
-        templateId: selectedTemplate,
+        mimeType,
       });
 
-      if (result.success && result.tables) {
-        // Redirect to Results page for persistent viewing
-        if (result.conversionId) {
-          setLocation(`/results/${result.conversionId}`);
-          return;
-        }
+      console.log('Analysis response:', analysisRes);
+      setIsAnalyzing(false);
 
-        // Fallback: show results inline if no conversion ID
-        setProcessingStep('ready');
-        setExtractedTables(result.tables);
-        const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
-        setWarnings(validWarnings);
-        setConfidence(result.confidence || 0);
-        setConversionId(result.conversionId || null);
-        setPageCount(result.pageCount);
-
-        // Clear pending file
-        setPendingFile(null);
+      if (analysisRes.success && analysisRes.analysis) {
+        // Show ExtractionOptions dialog
+        setAnalysisResult(analysisRes.analysis);
+        setProcessingStep(null);
+        setPendingFile(null); // Clear pending file since we're now in analysis mode
+        toast.success('Document analyzed! Choose how to extract.');
       } else {
-        setError(result.error || 'No tables could be extracted');
-        setProcessingStep('ready');
+        // Analysis failed - fall back to quick extraction
+        toast.info('Proceeding with quick extraction...');
+        setProcessingStep('extract');
+
+        const result = await processMutation.mutateAsync({
+          fileBase64: pendingFile.base64,
+          fileName: pendingFile.name,
+          fileSize: pendingFile.size,
+          mimeType,
+          templateId: selectedTemplate,
+        });
+
+        if (result.success && result.tables) {
+          if (result.conversionId) {
+            toast.success(`Extracted ${result.tables.length} table(s)!`);
+            setLocation(`/results/${result.conversionId}`);
+            return;
+          }
+
+          setProcessingStep('ready');
+          setExtractedTables(result.tables);
+          const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
+          setWarnings(validWarnings);
+          setConfidence(result.confidence || 0);
+          setConversionId(result.conversionId || null);
+          setPageCount(result.pageCount);
+          setPendingFile(null);
+        } else {
+          setError(result.error || 'No tables could be extracted');
+          setProcessingStep('ready');
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Conversion error:', err);
-      setError('Failed to process document. Please try again.');
-      setProcessingStep('ready');
+      setIsAnalyzing(false);
+      setError(err.message || 'Failed to process document. Please try again.');
+      setProcessingStep('error');
     }
-  }, [pendingFile, usageData, selectedTemplate, processMutation]);
+  }, [pendingFile, usageData, selectedTemplate, processMutation, analyzeMutation, setLocation]);
 
   // Process pending multiple files from landing page (Pro feature)
   const processPendingFiles = useCallback(async () => {
@@ -287,13 +333,15 @@ export default function Convert() {
     const batchId = `batch-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     setCurrentBatchId(batchId);
 
-    // Store the first PDF for split view preview
-    const firstPdf = pendingFiles.find(f =>
+    // Store ALL PDF files for split view preview
+    const allPdfs = pendingFiles.filter(f =>
       f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf'
     );
-    if (firstPdf) {
-      setOriginalPdfBase64(firstPdf.base64);
+    if (allPdfs.length > 0) {
+      setPdfFiles(allPdfs.map(f => ({ base64: f.base64, fileName: f.name })));
+      setOriginalPdfBase64(allPdfs[0].base64); // Keep for backward compatibility
     } else {
+      setPdfFiles([]);
       setOriginalPdfBase64(null);
     }
 
@@ -395,13 +443,15 @@ export default function Convert() {
     const batchId = `batch-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     setCurrentBatchId(batchId);
 
-    // Store the first PDF for split view preview
-    const firstPdf = files.find(f =>
+    // Store ALL PDF files for split view preview
+    const allPdfs = files.filter(f =>
       f.file.type === 'application/pdf' || f.file.name.toLowerCase().endsWith('.pdf')
     );
-    if (firstPdf) {
-      setOriginalPdfBase64(firstPdf.base64);
+    if (allPdfs.length > 0) {
+      setPdfFiles(allPdfs.map(f => ({ base64: f.base64, fileName: f.file.name })));
+      setOriginalPdfBase64(allPdfs[0].base64); // Keep for backward compatibility
     } else {
+      setPdfFiles([]);
       setOriginalPdfBase64(null);
     }
 
@@ -584,87 +634,6 @@ export default function Convert() {
     }
   }, [usageData, analyzeMutation, processMutation, isPro, processedFiles, selectedTemplate]);
 
-  const handleTrySample = useCallback(async (templateId: string, sampleUrl: string) => {
-    setError(null);
-    setExtractedTables(null);
-    setWarnings([]);
-    setViewMode('preview');
-    setIsTryingSample(true);
-    setSelectedTemplate(templateId);
-    
-    // Get the sample file name from URL
-    const sampleFileName = sampleUrl.split('/').pop() || 'sample-document';
-    setFileName(sampleFileName);
-
-    setProcessingStep('upload');
-    toast.info(`Loading ${templateId.replace('-', ' ')} sample...`);
-
-    try {
-      // Fetch the sample image and convert to base64
-      const response = await fetch(sampleUrl);
-      const blob = await response.blob();
-      
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve) => {
-        reader.onloadend = () => {
-          const base64 = reader.result as string;
-          // Remove data URL prefix to get just the base64
-          const base64Data = base64.split(',')[1] || base64;
-          resolve(base64Data);
-        };
-      });
-      reader.readAsDataURL(blob);
-      const base64 = await base64Promise;
-
-      // Store PDF for split view if sample is a PDF
-      const isPdf = sampleFileName.toLowerCase().endsWith('.pdf') || blob.type === 'application/pdf';
-      if (isPdf) {
-        setOriginalPdfBase64(base64);
-      } else {
-        setOriginalPdfBase64(null);
-      }
-
-      setProcessingStep('analyze');
-
-      const result = await processMutation.mutateAsync({
-        fileBase64: base64,
-        fileName: sampleFileName,
-        fileSize: blob.size,
-        mimeType: blob.type || 'image/png',
-        templateId: templateId,
-        isSampleDemo: true, // Flag to bypass Pro check for samples
-      });
-
-      if (!result.success) {
-        setProcessingStep('error');
-        setError(result.error || 'Processing failed');
-        return;
-      }
-
-      setProcessingStep('extract');
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      setProcessingStep('verify');
-      await new Promise(resolve => setTimeout(resolve, 300));
-
-      setProcessingStep('ready');
-      setExtractedTables(result.tables || []);
-      // Ensure warnings array has valid objects with message property
-      const validWarnings = (result.warnings || []).filter((w: AIWarning) => w && typeof w.message === 'string');
-      setWarnings(validWarnings);
-      setConfidence(result.confidence || 0);
-      setConversionId(result.conversionId || null);
-      setPageCount(result.pageCount || undefined);
-
-      toast.success(`Sample processed! See what ${templateId.replace('-', ' ')} template can do.`);
-    } catch (err: any) {
-      setProcessingStep('error');
-      setError(err.message || 'An unexpected error occurred');
-    } finally {
-      setIsTryingSample(false);
-    }
-  }, [processMutation]);
-
   const handleReset = () => {
     setProcessingStep(null);
     setError(null);
@@ -689,6 +658,7 @@ export default function Convert() {
     setIsExtracting(false);
     // Clear PDF for split view
     setOriginalPdfBase64(null);
+    setPdfFiles([]);
   };
 
   // Handler for guided extraction after analysis dialog
@@ -820,6 +790,7 @@ export default function Convert() {
                 {usageData.remaining} / 3 conversions today
               </Badge>
             )}
+            <ThemeToggle />
             {isAuthenticated ? (
               <Button variant="outline" onClick={() => setLocation('/dashboard')}>
                 Dashboard
@@ -864,18 +835,6 @@ export default function Convert() {
                   </div>
                 </CardContent>
               </Card>
-            )}
-
-            {/* Template Selector */}
-            {templatesData && (
-              <TemplateSelector
-                templates={templatesData.templates}
-                selectedTemplate={selectedTemplate}
-                onSelectTemplate={setSelectedTemplate}
-                isPro={templatesData.userIsPro}
-                onUpgradeClick={() => setLocation('/pricing')}
-                onTrySample={handleTrySample}
-              />
             )}
 
             {/* File Upload or Pending File(s) */}
@@ -949,34 +908,31 @@ export default function Convert() {
               />
             )}
 
-            {/* Selected template info */}
-            {selectedTemplate !== 'generic' && templatesData && (
-              <div className="text-center text-sm text-muted-foreground">
-                Using <span className="font-medium text-foreground">
-                  {templatesData.templates.find(t => t.id === selectedTemplate)?.name}
-                </span> template for optimized extraction
-              </div>
-            )}
+            {/* Upload instructions */}
+            <div className="text-center text-sm text-muted-foreground">
+              Upload your document and our AI will analyze it to suggest the best extraction method
+            </div>
 
           </div>
         )}
 
-        {/* Analysis Dialog - Show after document analysis */}
+        {/* Extraction Options - Show after document analysis */}
         {analysisResult && !extractedTables && (
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-2xl mx-auto">
             <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-semibold">Document Analysis Complete</h2>
+              <h2 className="text-xl font-semibold">Extract Your Data</h2>
               <Button variant="ghost" size="sm" onClick={handleReset}>
                 <RotateCcw className="h-4 w-4 mr-2" />
                 Start Over
               </Button>
             </div>
             {analysisResult.analysis ? (
-              <AnalysisDialog
+              <ExtractionOptions
                 analysis={analysisResult}
                 fileName={fileName}
+                isPro={isPro}
                 onExtract={handleGuidedExtract}
-                onQuickExtract={handleQuickExtract}
+                onUpgradeClick={() => setLocation('/pricing')}
                 isExtracting={isExtracting}
               />
             ) : (
@@ -1152,7 +1108,7 @@ export default function Convert() {
                             </thead>
                             <tbody>
                               {table.rows.slice(0, 10).map((row, rowIndex) => (
-                                <tr key={rowIndex} className="hover:bg-muted/50">
+                                <tr key={rowIndex} className="hover:bg-muted/50 transition-colors">
                                   {row.map((cell, cellIndex) => (
                                     <td key={cellIndex} className="border px-3 py-2">
                                       {cell ?? ''}
@@ -1207,6 +1163,7 @@ export default function Convert() {
                   </div>
                   <PreviewContainer
                     pdfFile={originalPdfBase64}
+                    pdfFiles={pdfFiles.length > 1 ? pdfFiles : undefined}
                     extractedSheets={extractedTables}
                     defaultViewMode="split"
                   />

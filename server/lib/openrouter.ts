@@ -8,9 +8,46 @@ const GOOGLE_AI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
 
 /**
+ * Detect if a row is a summary/total row that should NOT receive merged cell values
+ * Summary rows typically contain keywords like TOTAL, SUM, SUBTOTAL, etc.
+ */
+function isSummaryRow(row: (string | null)[]): boolean {
+  const summaryKeywords = [
+    'total', 'totalt', 'summa', 'sum', 'subtotal', 'grand total',
+    'amount due', 'balance', 'net', 'gross', 'average', 'avg',
+    'count', 'min', 'max', 'mean', 'median',
+    // Swedish/Nordic
+    'totalt', 'summa', 'delsumma', 'slutsumma', 'moms', 'att betala',
+    // German
+    'gesamt', 'summe', 'zwischensumme', 'mwst', 'netto', 'brutto',
+    // Common abbreviations
+    'tot', 'sub', 'ttl'
+  ];
+
+  // Check first few cells for summary keywords
+  for (let i = 0; i < Math.min(3, row.length); i++) {
+    const cellValue = row[i];
+    if (cellValue && typeof cellValue === 'string') {
+      const lowerValue = cellValue.toLowerCase().trim();
+      // Check if the cell contains any summary keyword
+      for (const keyword of summaryKeywords) {
+        if (lowerValue === keyword ||
+            lowerValue.startsWith(keyword + ' ') ||
+            lowerValue.startsWith(keyword + ':') ||
+            lowerValue.endsWith(' ' + keyword) ||
+            lowerValue.includes(' ' + keyword + ' ')) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Post-process extracted tables to fix common AI alignment issues:
  * 1. Remove empty strings that shift data
- * 2. Fill in merged cell values from previous rows
+ * 2. Fill in merged cell values from previous rows (but NOT for summary rows)
  * 3. Ensure row length matches header length
  */
 function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
@@ -57,25 +94,34 @@ function postProcessTables(tables: ExtractedTable[]): ExtractedTable[] {
 
       // Step 4: Fill in empty values at the start with values from previous row
       // (handles merged cells that span multiple rows)
-      for (let colIndex = 0; colIndex < row.length; colIndex++) {
-        const value = row[colIndex];
+      // CRITICAL: Do NOT fill summary/total rows - they should keep their own values
+      const isThisSummaryRow = isSummaryRow(row);
 
-        // If this cell is empty/null and we have a previous value, use it
-        // But only for the first few columns (typically merged cells are on the left)
-        if ((value === '' || value === null) && lastValues[colIndex] !== null) {
-          // Only fill if this looks like a merged cell scenario:
-          // - It's in the first 3 columns (Project, Phase, Department, etc.)
-          // - The rest of the row has data
-          const hasDataAfter = row.slice(colIndex + 1).some(v => v !== '' && v !== null);
-          if (colIndex < 3 && hasDataAfter) {
-            row[colIndex] = lastValues[colIndex];
+      if (!isThisSummaryRow) {
+        for (let colIndex = 0; colIndex < row.length; colIndex++) {
+          const value = row[colIndex];
+
+          // If this cell is empty/null and we have a previous value, use it
+          // But only for the first few columns (typically merged cells are on the left)
+          if ((value === '' || value === null) && lastValues[colIndex] !== null) {
+            // Only fill if this looks like a merged cell scenario:
+            // - It's in the first 3 columns (Project, Phase, Department, etc.)
+            // - The rest of the row has data
+            const hasDataAfter = row.slice(colIndex + 1).some(v => v !== '' && v !== null);
+            if (colIndex < 3 && hasDataAfter) {
+              row[colIndex] = lastValues[colIndex];
+            }
+          }
+
+          // Update last values for non-empty cells
+          if (value !== '' && value !== null) {
+            lastValues[colIndex] = value;
           }
         }
-
-        // Update last values for non-empty cells
-        if (value !== '' && value !== null) {
-          lastValues[colIndex] = value;
-        }
+      } else {
+        // For summary rows: Reset lastValues to prevent leaking into rows AFTER the summary
+        // This is critical because summary rows mark the end of a logical section
+        lastValues.fill(null);
       }
 
       // Step 5: Convert empty strings to null for consistency
