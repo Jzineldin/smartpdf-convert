@@ -303,7 +303,7 @@ export default function Home() {
               {/* Headline - Pain focused */}
               <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold tracking-tight animate-slide-up">
                 Stop Re-Keying{' '}
-                <span className="gradient-text">
+                <span className="gradient-text inline-block min-w-[280px] md:min-w-[420px] lg:min-w-[520px] text-left">
                   <Typewriter words={HERO_WORDS} typingSpeed={80} deletingSpeed={40} pauseDuration={2500} />
                 </span>
                 <br />
