@@ -33,7 +33,7 @@ const PLANS = [
     period: '/month',
     description: 'For accountants & small businesses',
     features: [
-      { text: '100 invoice extractions/month', included: true },
+      { text: '100 extractions/month', included: true },
       { text: 'Invoice template with line items', included: true },
       { text: 'Bank statement extraction', included: true },
       { text: 'All specialized templates', included: true },
@@ -47,8 +47,8 @@ const PLANS = [
 
 const FAQ = [
   {
-    question: 'What\'s included in the 100 invoice extractions?',
-    answer: 'Each invoice you process counts as one extraction. Multi-page invoices count as one extraction. Unused extractions don\'t roll over to the next month.',
+    question: 'What\'s included in the 100 extractions?',
+    answer: 'Each document you process counts as one extraction. Multi-page documents count as one extraction. Unused extractions don\'t roll over to the next month.',
   },
   {
     question: 'What payment methods do you accept?',
@@ -60,7 +60,7 @@ const FAQ = [
   },
   {
     question: 'What happens when I hit my limit?',
-    answer: 'Free users get 3 conversions per day (resets at midnight UTC). Pro users get 100 invoice extractions per month. Need more? Contact us for custom plans.',
+    answer: 'Free users get 3 conversions per day (resets at midnight UTC). Pro users get 100 extractions per month. Need more? Contact us for custom plans.',
   },
   {
     question: 'Can I cancel anytime?',
